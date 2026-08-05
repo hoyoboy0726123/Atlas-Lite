@@ -1,0 +1,12 @@
+# .sh 一律 LF —— CRLF 會讓 WSL/bash 直接語法錯誤。
+*.sh text eol=lf
+
+# .bat 一律 CRLF，且必須是純 ASCII（見 docs/windows-notes.md）。
+*.bat text eol=crlf
+
+# 二進位不做換行轉換
+*.png binary
+*.jpg binary
+*.ico binary
+*.safetensors binary
+*.onnx binary

@@ -1,0 +1,54 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv.*/
+venv/
+
+# ── 環境變數 ──────────────────────────────────────────────
+.env
+*.env.local
+
+# ── 前端 ──────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# ── 執行時資料（不進版控）──────────────────────────────────
+# data/ 底下是 DB、log、錨點圖、每次 run 的產物 —— 全是使用者資料。
+# 但要保留目錄結構，讓 clone 下來就能跑。
+#
+# ⚠ 順序有意義：git 一旦排除了某個「目錄」，就無法再用 ! 把裡面的檔案救回來。
+#   所以要先 !目錄 再排除內容，不能直接寫 data/**。
+data/**
+!data/
+!data/logs/
+!data/workflows/
+!data/**/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+
+# ── 地端 VLM 外掛的權重（8.3GB，絕不進 git）────────────────
+# 由 plugins/vlm_grounding/setup.bat 下載，或從既有環境複製。
+plugins/vlm_grounding/models/
+plugins/vlm_grounding/_io/
+
+# ── 使用者自己的腳本專案 ──────────────────────────────────
+external_projects/*
+!external_projects/README.txt
+
+# ── 作業系統 / 編輯器 ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# ── 暫存 ──────────────────────────────────────────────────
+*.log
+*.tmp
+_test_*.py

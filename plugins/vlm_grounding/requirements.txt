@@ -1,0 +1,22 @@
+# 地端 GUI 定位模型（選用外掛）—— 裝在本目錄的獨立 .venv，不碰主專案。
+#
+# ⚠ torch / torchvision 必須從 PyTorch 官方索引裝 CUDA 版：
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   PyPI 上的同名套件是 CPU 版，裝了 torch.cuda.is_available() 會是 False。
+#   cu128 對應 CUDA 12.8，支援到 Blackwell(sm_120)；舊卡可改 cu121。
+#
+# 2026-08-06 於 RTX 5090 Laptop / Windows 11 / Python 3.13 實測可用。
+
+# --index-url https://download.pytorch.org/whl/cu128
+torch>=2.11
+torchvision>=0.26          # ⚠ 別漏！Qwen3VLVideoProcessor 需要它，缺了模型載入直接失敗
+
+transformers>=5.14
+accelerate>=1.14
+qwen-vl-utils>=0.0.14
+safetensors>=0.8
+pillow>=11
+
+# int4 量化 —— 只有 VRAM < 12GB 時才會用到。
+# 0.50.0 起有官方 win_amd64 wheel，Windows 可直接裝。
+bitsandbytes>=0.50
