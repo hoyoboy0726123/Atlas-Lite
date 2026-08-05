@@ -2,14 +2,35 @@
 
 **Windows 桌面自動化(RPA)+ Python 腳本流程引擎。零 LLM 也能完整運作。**
 
-從 [Atlas](../Atlas) 抽取而來,只保留兩種核心節點:
+從 [Atlas](../Atlas) 抽取而來,只保留四種節點:
 
 | 節點 | 做什麼 |
 |---|---|
-| **桌面自動化** | 錄製滑鼠鍵盤 → 回放。CV 錨點比對 / OCR / UIA 三層定位 |
-| **Python 腳本** | 執行你自己的 `.py`,步驟間可傳結構化資料 |
+| **Python 腳本** | 執行你自己的 `.py` 或任何命令,步驟間可傳結構化資料 |
+| **桌面自動化** | 錄製滑鼠鍵盤 → 回放。UIA / CV 錨點比對 / OCR 三層定位 |
+| **條件分支** | IF / Switch,用 Jinja2 表達式求值,不是 `eval`、也不是 LLM |
+| **人工確認** | 暫停等你點頭,可推播到 Telegram 遠端決定 |
 
-外加流程控制:條件分支、人工確認、排程、Webhook/資料夾觸發、Telegram 通知。
+外加:排程、Webhook 觸發、資料夾監看觸發、Secrets Vault。
+
+### 步驟之間怎麼傳資料
+
+三種方式,腳本不用學任何 API:
+
+```python
+# 1. 寫 _step_export.json 到 cwd → 下游用 {{ steps.抓資料.output.rows }}
+json.dump({"rows": 150}, open("_step_export.json", "w"))
+
+# 2. output.path 指向 .json → 裡面的純量欄位自動開放給下游引用
+json.dump({"rows": 150, "status": "ok"}, open("result.json", "w"))
+```
+
+```yaml
+# 3. output.json_schema —— 唯一的輸出驗證機制,0 成本、錯在哪一欄講得清楚
+output:
+  path: result.json
+  json_schema: { type: object, required: [rows], properties: { rows: { type: integer } } }
+```
 
 ---
 
@@ -105,15 +126,44 @@ plugins\vlm_grounding\setup.bat
 launch.bat
 ```
 
-首次執行會自動建立 venv、安裝相依、啟動前後端。
+首次執行會自動建立 venv、安裝相依、啟動前後端。開 http://localhost:3020。
+
+無頭機器(或用排程 / Webhook / Telegram 驅動)只要後端:
+
+```cmd
+launch.bat --no-frontend
+```
+
+不填任何設定就能用 —— 沒有 API 金鑰要準備。`.env` 只有 Telegram 與路徑,全部選填。
+
+---
+
+## 從 Atlas 匯入既有工作流
+
+匯出的 zip 直接拖進側邊欄即可,但兩件事要知道:
+
+- **用到 AI 節點的工作流會被明確擋下**,錯誤訊息會指出是哪一步、哪種節點。
+  這是刻意的 —— 靜默丟掉會讓一個 AI 技能節點退化成「空指令的腳本節點」,
+  跑起來 exit 0 卻什麼都沒做,比載入失敗糟糕得多。
+- **錨點圖不會跟著進來**。它們動輒幾十 MB,而且換一台機器解析度不同本來就要重錄。
 
 ---
 
 ## 安全性
 
-- API **沒有認證**,而且腳本節點能執行任意 Python
-- 因此預設只綁 `127.0.0.1`。**綁 `0.0.0.0` 等於對區網開放一個可執行後門**
-- 被自動化的應用程式密碼請放 `secrets vault`,不要寫在 YAML 裡
+這個後端會在你的電腦上**執行任意腳本、操作你的桌面**。以下不是形式條款:
+
+- API **沒有認證**。預設只綁 `127.0.0.1`,
+  **綁 `0.0.0.0` 等於把整台機器交給區網上任何人**。
+- **Webhook token 就是憑證** —— 外流等同把執行權交出去。只有你按「建立」才會有,
+  隨時可以重新產生(舊的立刻失效)。
+- **Telegram 遠端遙控預設關閉**。開了之後,設定裡那個 chat 可以直接在這台機器上
+  啟動工作流。只有你自己會用手機遙控時才開。
+- **安裝套件一定要經過你按鈕授權**。步驟因為 `ModuleNotFoundError` 失敗時,
+  系統會問你,不會自己裝。
+- 被自動化的應用程式密碼請放 **Secrets Vault**(設定頁),用 `{{ secrets.名稱 }}` 引用,
+  不要寫進 YAML。誠實說明:金鑰檔就在同一台機器上(`data/.vault_key`),
+  這擋的是「DB 或匯出包外流時裡面沒有明文」,不是擋拿得到你電腦的人。
 
 ---
 

@@ -1,0 +1,56 @@
+# Atlas-Lite 後端依賴（Python 3.11+，程式用到 X | Y union 型別註解）
+#
+# 相對 Atlas 拿掉的：langchain-* / google-genai / mcp / fastembed / crawl4ai 相關
+# （httpx-trafilatura-markdownify）/ pandas / python-docx / python-pptx /
+# matplotlib / pypdfium2 —— 全部只服務 LLM 節點或檔案預覽 render。
+# 結果：安裝體積從 ~1.4GB 降到 ~250MB，且完全不需要任何 API 金鑰。
+#
+# 地端 GUI 定位模型（torch ~3GB）**不在這裡** —— 它是獨立外掛，
+# 裝在 plugins/vlm_grounding/.venv，見 plugins/vlm_grounding/requirements.txt。
+
+# ── Web 框架 ────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+python-multipart
+aiofiles==24.1.0
+
+# ── 設定 / 資料 ─────────────────────────────────────────────
+python-dotenv==1.0.1
+pyyaml==6.0.2
+sqlalchemy==2.0.36
+# condition 節點求值 + {{ }} 變數插值。用 StrictUndefined，不用 eval。
+jinja2>=3.1.0
+# Secrets Vault：憑證用 Fernet 加密存 SQLite，工作流用 {{ secrets.名稱 }} 引用，
+# 不用把 API key 明文寫進 YAML。
+cryptography
+
+# ── 排程 / 觸發器 / 通知 ────────────────────────────────────
+apscheduler==3.10.4
+python-telegram-bot==21.6
+
+# ── 執行器 ──────────────────────────────────────────────────
+# Windows 上 create_subprocess_shell 會包一層 cmd.exe，只殺父行程會留下孤兒，
+# 所以 kill 要走完整 process tree。
+psutil
+
+# ── 桌面自動化（computer_use 節點核心）──────────────────────
+pyautogui
+pynput
+mss
+opencv-python
+numpy
+Pillow
+pyperclip  # 貼上非 ASCII（中文）文字時用
+# UIA：錄製時抓 UI element + 回放的 UIA-first 三層 fallback
+uiautomation; sys_platform == "win32"
+
+# ── OCR 定位（RapidOCR = PaddleOCR 模型的 ONNX 版）──────────
+# 之前用 Windows.Media.Ocr 在 <150% scaling 對複雜中文（檔/總/盤/畫等）會漏字，
+# 在 Mica 半透明背景上更糟。RapidOCR 跨 scaling / 跨 OS 都穩定整詞識別，
+# 依賴只有 onnxruntime ~50MB + 模型 ~15MB，首次執行會自動下載模型。
+rapidocr
+onnxruntime
+# 簡繁歸一化 —— RapidOCR 中文模型語料以簡體為主（「軟」會讀成「软」、
+# 「畫」讀成「画」），比對前雙邊都轉簡體。
+opencc-python-reimplemented
