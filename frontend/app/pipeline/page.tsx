@@ -394,8 +394,6 @@ export default function PipelinePage() {
 
   // ── Workflow Store ────────────────────────────────────────────────────────
   const { activeId, workflows, updateWorkflow, saveCanvas, createWorkflow } = useWorkflowStore()
-  // Hero UX 重塑(Phase 2/3):chatUIState='hero' 時在最上層 render 全螢幕 Hero 浮層
-  const chatUIState = useWorkflowStore(s => s.chatUIState)
 
   // 當 activeId 改變時，載入對應工作流（defer 避免 render-time setState）
   useEffect(() => {
@@ -521,8 +519,6 @@ export default function PipelinePage() {
     if (savingRef.current || !activeId) return
     updateWorkflow(activeId, { name: pipelineName })
   }, [pipelineName]) // eslint-disable-line
-
-  }, [nodes, edges, pipelineName]) // eslint-disable-line
 
   const selectedNode = nodes.find(n => n.id === selectedId)
 
@@ -704,7 +700,7 @@ export default function PipelinePage() {
     const yamlText = stepsToYaml(`${pipelineName}_selfrun`, steps)
     try {
       const { startPipeline } = await import('@/lib/api')
-      const r = await startPipeline(yamlText, true, false, activeId ?? undefined)
+      const r = await startPipeline(yamlText, activeId ?? undefined)
       setRunId(r.run_id)
       setRunStatus('running')
       setRunning(true)
@@ -915,7 +911,7 @@ export default function PipelinePage() {
     if (target && target.type === 'computerUse') {
       const d = target.data as ComputerUseData
       const assets = d.assetsDir ||
-        `ai_output/${pipelineName || 'pipeline'}/${d.name}_assets`
+        `workflows/${pipelineName || 'pipeline'}/${d.name}_assets`
       // fire-and-forget：失敗也不中斷刪除流程
       deleteComputerUseAssets(assets).catch(() => {/* ignore */})
     }
@@ -1314,11 +1310,6 @@ export default function PipelinePage() {
       if (runStatusRef.current === 'awaiting') {
         setAwaitingRunId(null)
         setAwaitingSuggestion('')
-        setShowHintInput(false)
-        setHintText('')
-        setAskUserOptions([])
-        setAskUserContext('')
-        setAskUserAnswer('')
         toast.dismiss('awaiting')
         // 如果後端已是 completed/failed/aborted，不設 idle，讓下方 done 分支處理
         if (data.status === 'running') {
@@ -1363,8 +1354,6 @@ export default function PipelinePage() {
       toast.dismiss('awaiting')
       if (pollRef.current) clearInterval(pollRef.current)
       if (bgDetectRef.current) { clearInterval(bgDetectRef.current); bgDetectRef.current = null }
-      setShowHintInput(false)
-      setHintText('')
       try {
         // 走和重試相同的 /resume 路徑（已支援 decision='abort'），避免 /abort 端點問題
         await resumePipeline(rid, 'abort')
@@ -1391,8 +1380,6 @@ export default function PipelinePage() {
       // 此時 runIdRef.current 已被 poll 的 done 分支清空，不可再覆寫狀態
       setAwaitingRunId(null)
       toast.dismiss('awaiting')
-      setShowHintInput(false)
-      setHintText('')
       if (runIdRef.current) {
         setRunStatus('running')
         setRunning(true)
@@ -1463,7 +1450,7 @@ export default function PipelinePage() {
           onClick={async () => {
             try {
               const r = await openOutputFolder(pipelineName)
-              if (!r.existed) alert('此工作流尚無輸出,已開啟 ai_output 根目錄。')
+              if (!r.existed) alert('此工作流尚無輸出,已開啟 data/workflows 根目錄。')
             } catch (e) {
               alert('開啟輸出資料夾失敗:' + (e as Error).message)
             }

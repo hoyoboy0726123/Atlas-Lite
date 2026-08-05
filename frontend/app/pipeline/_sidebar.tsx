@@ -1,8 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import {
-  Plus, Workflow, Loader2, Pencil, Check, Trash2, Settings, Download, Upload, Square, Sparkles,
-} from 'lucide-react'
+  Plus, Workflow, Loader2, Pencil, Check, Trash2, Settings, Download, Upload, Square, } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useWorkflowStore } from './_store'
@@ -79,7 +78,7 @@ function WorkflowItem({
     const ok = confirm(
       `確定要把「${name}」改成「${newName}」嗎？\n\n` +
       `⚠️ 注意：\n` +
-      `• 若步驟有使用「預設輸出路徑」（沒手動指定），下次執行會改寫到 ai_output/${newName}/ 資料夾，舊檔案不會搬過去\n` +
+      `• 若步驟有使用「預設輸出路徑」（沒手動指定），下次執行會改寫到 data/workflows/${newName}/ 資料夾，舊檔案不會搬過去\n` +
             `建議：改名前最好所有節點都已明確指定「輸出路徑」。`
     )
     if (!ok) { setDraft(name); setEditing(false); return }
@@ -200,7 +199,6 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
   const {
     workflows, activeId,
     createWorkflow, updateWorkflow, removeWorkflow, setActive,
-    setChatUIState,
   } = useWorkflowStore()
 
   // ── 拖曳調寬 ─────────────────────────────────────────────────────
@@ -388,9 +386,6 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
       let msg = `已匯入「${res.workflow.name}」`
       if (res.needs_reanchor) msg += '（桌面自動化節點的錨點圖沒有一起匯入，需要重新錄製）'
       toast.success(msg)
-      if (res.has_local_scripts) {
-        toast.info('此工作流包含本地腳本步驟，請先確認相關腳本檔案已準備好才能執行', { duration: 6000 })
-      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '匯入失敗')
     }
@@ -439,7 +434,7 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
             <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs leading-relaxed">
               <div className="font-medium text-amber-800 mb-1">⚠️ 關於名稱的提醒</div>
               <ul className="text-amber-700 space-y-0.5 ml-4 list-disc">
-                <li>名稱會成為「預設輸出資料夾」的路徑（<code className="font-mono">ai_output/名稱/</code>）</li>
+                <li>名稱會成為「預設輸出資料夾」的路徑（<code className="font-mono">data/workflows/名稱/</code>）</li>
                 <li>改名會變更輸出資料夾的預設路徑，舊的產出檔會留在舊路徑</li>
                 <li>建議：取一個穩定的名字，每個節點都**明確指定輸出路徑**以避免後續問題</li>
               </ul>
@@ -454,15 +449,15 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
         </div>
       )}
 
-      {/* ── Logo — Atlas (山峰幾何 A) ── */}
+      {/* ── Logo（山峰幾何 A）── */}
       <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-100">
         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-600 flex items-center justify-center shrink-0 shadow-md">
-          <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-label="Atlas">
+          <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-label="Atlas-Lite">
             <path d="M4 21 L12 3 L20 21" />
             <path d="M7.8 14 L16.2 14" />
           </svg>
         </div>
-        <span className="font-bold text-gray-900 text-base flex-1 tracking-tight">Atlas</span>
+        <span className="font-bold text-gray-900 text-base flex-1 tracking-tight">Atlas-Lite</span>
         <Link
           href="/settings"
           className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
@@ -489,14 +484,6 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
         >
           <Plus className="w-3.5 h-3.5" />
           新增
-        </button>
-        <button
-          onClick={() => setChatUIState('hero')}
-          className="flex items-center justify-center gap-1.5 px-3 py-2 border border-violet-200 text-violet-700 bg-violet-50 rounded-xl text-xs font-medium hover:bg-violet-100 transition-colors"
-          title="讓 AI 助手幫你新增一個新工作流(乾淨對話、與目前工作流完全脫鉤)"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          新對話
         </button>
         <button
           onClick={() => importRef.current?.click()}

@@ -37,15 +37,6 @@ function apiToWorkflow(d: WorkflowData): Workflow {
   }
 }
 
-// ── Chat UI 狀態機 ────────────────────────────────────────────────────────────
-// Hero UX 重塑(Phase 2):AI 助手呈現方式的四種模式
-//   - 'hero':首頁中央大畫面(預設、每次進站都看)
-//   - 'sidebar':嵌在左 sidebar 底部(原本 Phase 1 行為)
-//   - 'mini':縮小成 floating button(Phase 4)
-//   - 'drawer':從旁邊滑出的抽屜(Phase 4)
-// hasInteracted:有過互動就 true(目前未使用、Phase 4/5 會根據它決定要不要回到 hero)
-export type ChatUIState = 'hero' | 'sidebar' | 'mini' | 'drawer'
-
 // ── Store ────────────────────────────────────────────────────────────────────
 interface WorkflowStore {
   workflows: Workflow[]
@@ -64,12 +55,6 @@ interface WorkflowStore {
   // 同時帶上 yaml 一起存，讓 TG 遠端遙控等不經過前端 getYaml() 的入口
   // 也能直接讀到對應的 YAML（不再因為 yaml 欄位空而拒絕啟動）。
   saveCanvas: (id: string, nodes: AppNode[], edges: Edge[], yaml?: string) => void
-
-  // ── AI 助手 UI 狀態(Hero UX 重塑)──────────────────────────────────────
-  chatUIState: ChatUIState     // 預設 'hero'(每次進站都看)
-  hasInteracted: boolean       // 有過互動就 true(Phase 4/5 用)
-  setChatUIState: (s: ChatUIState) => void
-  setHasInteracted: (b: boolean) => void
 }
 
 // 防抖佇列：合併多次快速 saveCanvas / updateWorkflow 呼叫
@@ -168,13 +153,6 @@ export const useWorkflowStore = create<WorkflowStore>()(
       if (typeof yaml === 'string') patch.yaml = yaml
       _debouncedApiUpdate(id, patch)
     },
-
-    // ── AI 助手 UI 狀態 ──────────────────────────────────────────────────
-    // 預設 'hero' — 每次進站都看到中央大畫面、需主動操作 CTA 才會切到 sidebar
-    chatUIState: 'hero',
-    hasInteracted: false,
-    setChatUIState: (s) => set({ chatUIState: s }),
-    setHasInteracted: (b) => set({ hasInteracted: b }),
   })
 )
 

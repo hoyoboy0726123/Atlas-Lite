@@ -63,7 +63,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
 
   // 預設錄製輸出目錄
   const defaultAssetsDir = data.assetsDir ||
-    `ai_output/${pipelineName || 'pipeline'}/${data.name}_assets`
+    `workflows/${pipelineName || 'pipeline'}/${data.name}_assets`
 
   // 錄製過程輪詢狀態
   useEffect(() => {
@@ -566,8 +566,6 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                     )}
                     {typeof a.seconds === 'number' && a.seconds > 0 && (
                       <p className="text-xs text-gray-500 mt-0.5">{a.seconds}s</p>
-                    )}
-                      </div>
                     )}
                     {/* 地端 GUI 定位（click_image 專用）
                         關       → 走原本 UIA / CV / OCR / 座標

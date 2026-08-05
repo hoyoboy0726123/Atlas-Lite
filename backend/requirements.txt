@@ -1,4 +1,8 @@
-# Atlas-Lite 後端依賴（Python 3.11+，程式用到 X | Y union 型別註解）
+# Atlas-Lite 後端依賴。
+#
+# ⚠ Python 3.11 ~ 3.13。**不要用 3.14** —— pydantic 2.9.2 沒有 3.14 的 wheel，
+#   pip 會退去用 Rust 從原始碼編 pydantic-core，然後在缺 MSVC linker 的機器上
+#   炸一整面 cargo 錯誤。launch.bat 會自動挑 3.13/3.12/3.11。
 #
 # 相對 Atlas 拿掉的：langchain-* / google-genai / mcp / fastembed / crawl4ai 相關
 # （httpx-trafilatura-markdownify）/ pandas / python-docx / python-pptx /

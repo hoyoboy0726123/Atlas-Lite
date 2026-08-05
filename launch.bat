@@ -15,11 +15,24 @@ echo ==================================================
 echo.
 
 REM ---- 1. Backend venv + dependencies ----------------
+REM Pick the interpreter deliberately instead of taking whatever "python" is.
+REM pydantic 2.9.2 ships no wheel for Python 3.14, so a bare "python" that
+REM happens to be 3.14 falls back to compiling pydantic-core from Rust source
+REM and fails with a wall of cargo errors. Prefer 3.13, then 3.12, then 3.11.
+set "PY_CMD="
+for %%V in (3.13 3.12 3.11) do (
+    if not defined PY_CMD (
+        py -%%V -c "import sys" >NUL 2>&1
+        if not errorlevel 1 set "PY_CMD=py -%%V"
+    )
+)
+if not defined PY_CMD set "PY_CMD=python"
+
 if not exist "%~dp0backend\.venv\Scripts\python.exe" (
-    echo [Setup] Creating backend virtual environment...
-    python -m venv "%~dp0backend\.venv"
+    echo [Setup] Creating backend virtual environment using: %PY_CMD%
+    %PY_CMD% -m venv "%~dp0backend\.venv"
     if errorlevel 1 (
-        echo [X] Failed. Install Python 3.11+ and make sure "python" is on PATH.
+        echo [X] Failed. Install Python 3.11-3.13 and make sure it is on PATH.
         pause
         exit /b 1
     )

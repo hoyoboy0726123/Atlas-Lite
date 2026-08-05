@@ -56,7 +56,7 @@ export async function fsCheckVenv(dir: string): Promise<{ has_venv: boolean; pyt
 }
 
 // 在本機檔案總管開啟某工作流的輸出資料夾(OUTPUT_BASE_PATH/<工作流名稱>/)。
-// 後端與使用者同機才有意義;找不到該資料夾 → 後端退回開 ai_output 根並回 existed=false。
+// 後端與使用者同機才有意義;找不到該資料夾 → 後端退回開 data/workflows 根並回 existed=false。
 export async function openOutputFolder(name: string): Promise<{ opened: string; existed: boolean }> {
   const res = await fetch(`${BASE}/fs/open-output?name=${encodeURIComponent(name)}`)
   if (!res.ok) {

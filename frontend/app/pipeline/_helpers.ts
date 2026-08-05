@@ -187,6 +187,8 @@ export type ComputerUseNode = Node<ComputerUseData>
 export type ConditionNode = Node<ConditionData>
 export type AppNode = Node<StepData | HumanConfirmData | ComputerUseData | ConditionData>
 
+let _conditionCounter = 0
+
 export function newConditionData(index = 0): ConditionData {
   _conditionCounter++
   return {

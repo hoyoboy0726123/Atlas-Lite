@@ -295,7 +295,7 @@ export default function ScriptConfigPanel({ node, onUpdate, onClose, onDelete, a
                   workflowId={workflowId}
                   multiline
                   rows={1}
-                  placeholder="~/ai_output/...、可含 {{ input.date }}"
+                  placeholder="report.xlsx、可含 {{ input.date }}"
                   showHint={false}
                 />
               </div>
