@@ -176,6 +176,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     rivals: number; nearest: number; scanned: number
     phases?: { box: number; near: number; fullscreen: number }
     flat?: boolean; variance?: number
+    targetScore?: number; rivalScore?: number
   }>>({})
 
   // silent = 自動重算（設定一改就跑），不跳 toast；只有錄完 / 手動按按鈕才跳
@@ -195,6 +196,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
             rivals: r.rivals, nearest: r.nearest_rival_px,
             scanned: r.scanned ?? r.rivals, phases: r.phases,
             flat: r.flat, variance: r.variance,
+            targetScore: r.target_score, rivalScore: r.best_rival_score,
           }
         }
       }
@@ -207,11 +209,11 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
           { duration: 10000 })
       }
       if (nRival > 0) {
-        toast.warning(`${nRival} 個錨點在搜尋範圍內不只一處相似，回放時可能點錯（見動作列表的 ⚠）`,
+        toast.warning(`${nRival} 個錨點有分數逼近的替身，回放時可能被搶走（見動作列表的 ⚠）`,
           { duration: 7000 })
       }
       if (nFlat === 0 && nRival === 0) {
-        toast.success('錨點檢查通過：搜尋範圍內沒有會混淆的相似處')
+        toast.success('錨點檢查通過：搜尋範圍內沒有分數搶得走真目標的地方')
       }
     } catch (e) {
       console.warn('anchor check:', e)   // 分析失敗不影響錄製結果
@@ -695,11 +697,15 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       const onlyFullscreen = !nearRisk && (r.phases?.fullscreen || 0) > 0
                       return (
                         <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-snug">
-                          ⚠ 回放時搜尋範圍內有 {r.rivals} 個長得幾乎一樣的地方
-                          （最近的在 {r.nearest}px 外）。真目標若跑掉，可能改點到那些地方之一。
+                          ⚠ 回放時搜尋範圍內有 {r.rivals} 個地方，
+                          <strong>相似度逼近真目標</strong>
+                          （目標 {r.targetScore?.toFixed(2)} vs 它 {r.rivalScore?.toFixed(2)}，
+                          最近的在 {r.nearest}px 外）。
+                          CV 取範圍內分數最高的，所以真目標只要掉一點分就可能被它搶走。
                           {r.scanned > r.rivals && (
                             <span className="text-amber-600">
-                              （畫面上另有 {r.scanned - r.rivals} 個相似處，但執行時搆不到，沒列入）
+                              （畫面上另有 {r.scanned - r.rivals} 個較像的地方，
+                              但分數差得夠遠、搶不走，沒列入）
                             </span>
                           )}
                           <br />

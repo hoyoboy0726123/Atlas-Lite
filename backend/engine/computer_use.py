@@ -424,6 +424,18 @@ def _parse_search_region(action: dict) -> Optional[tuple[int, int, int, int]]:
 # 門檻用 0.5（跟 CV 預設一致）—— 分數在門檻以上的都是回放時可能被挑中的候選。
 ANCHOR_RIVAL_THRESHOLD = 0.5
 
+# 替身要「搶得走」才算數：CV 取的是搜尋範圍內**分數最高**的那一個，
+# 所以替身必須先贏過真目標。分數差得遠 = 只有真目標整個消失時才會被誤點，
+# 那不是「錨點不夠獨特」，報出來只會讓使用者學會忽略警告。
+#
+# 2026-08-06 實測（使用者實際錄的 8 個動作）：真目標一律 1.000，
+# 範圍內最強替身 0.593~0.699，差距 0.30~0.41 —— 全部搶不走，
+# 但舊版把它們全報成「長得幾乎一樣」。
+# 反例（會搶走的長相）：視窗標題列那三顆按鈕彼此 ~1.000，差距接近 0。
+# 取 0.15 當界線：回放時真目標本身也會掉分（主題色、DPI 縮放、反鋸齒），
+# 留這個緩衝才不會漏掉「目標稍微掉分就被搶走」的真風險。
+ANCHOR_RIVAL_GAP = 0.15
+
 # 錨點「有沒有特徵」的下限（灰階變異數）。
 # 2026-08-06 實測：TM_CCOEFF_NORMED 對零變異的模板是數學上退化的（除以 0），
 # 純色錨點跟**任何東西**比都拿 1.000 —— 連純雜訊都 1.000。
@@ -493,7 +505,8 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
     def _skip(why: str) -> dict:
         return {"checked": False, "rivals": 0, "nearest_rival_px": 0,
                 "scanned": 0, "phases": {"box": 0, "near": 0, "fullscreen": 0},
-                "flat": False, "variance": 0.0, "reason": why}
+                "flat": False, "variance": 0.0,
+                "target_score": 0.0, "best_rival_score": 0.0, "reason": why}
 
     img_name = (action.get("image") or "").strip()
     full_name = (action.get("full_image") or "").strip()
@@ -525,6 +538,7 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
             "checked": True, "rivals": 0, "nearest_rival_px": 0, "scanned": 0,
             "phases": {"box": 0, "near": 0, "fullscreen": 0},
             "flat": True, "variance": round(variance, 1),
+            "target_score": 0.0, "best_rival_score": 0.0,
             "reason": (f"這張錨點幾乎沒有特徵（灰階變異數 {variance:.1f}）——"
                        f"它跟畫面上任何一塊平坦區域都會是滿分，"
                        f"CV 可能命中完全無關的位置，幻覺守門也擋不住。"
@@ -553,8 +567,16 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
 
     # 離點擊點最近的那個峰值視為「真目標」，其餘都是替身
     peaks.sort(key=lambda p: (p[1] - cx) ** 2 + (p[2] - cy) ** 2)
-    rivals = peaks[1:]
-    scanned = len(rivals)
+    target_score = peaks[0][0]
+    all_rivals = peaks[1:]
+    scanned = len(all_rivals)
+
+    # 只留「搶得走」的：CV 取範圍內最高分，替身得先贏過真目標才可能被點到。
+    # 差距超過 ANCHOR_RIVAL_GAP 的替身，要等真目標整個從畫面消失才有機會 ——
+    # 那是「目標不見了」的問題，不是「錨點不夠獨特」，混在一起報只會製造雜訊。
+    _win_floor = target_score - ANCHOR_RIVAL_GAP
+    rivals = [r for r in all_rivals if r[0] >= _win_floor]
+    weak = scanned - len(rivals)
 
     # ── 逐一判定：執行時哪個階段真的搆得到這個替身 ──────────────────
     # 座標換算：peak 是全螢幕圖的座標，橘框是虛擬桌面的絕對座標
@@ -569,6 +591,7 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
 
     counts = {"box": 0, "near": 0, "fullscreen": 0}
     reachable: list[int] = []
+    best_rival = 0.0
     for val, px, py in rivals:
         d = int(((px - cx) ** 2 + (py - cy) ** 2) ** 0.5)
         hit = False
@@ -591,14 +614,23 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
             hit = True
         if hit:
             reachable.append(d)
+            best_rival = max(best_rival, val)
 
     if not reachable:
-        why = (f"畫面上有 {scanned} 個相似處，但執行時都搆不到"
-               f"（不在搜尋範圍內、或分數低於該階段門檻）" if scanned
-               else "錨點在錄製畫面上是獨一無二的")
+        if weak and not rivals:
+            why = (f"畫面上有 {weak} 個較像的地方，但分數都低於目標 "
+                   f"{ANCHOR_RIVAL_GAP:.2f} 以上（目標 {target_score:.2f}），"
+                   f"搶不走 —— 只有真目標整個從畫面消失時才可能被誤點")
+        elif scanned:
+            why = (f"畫面上有 {scanned} 個相似處，但執行時都搆不到"
+                   f"（不在搜尋範圍內、或分數低於該階段門檻）")
+        else:
+            why = "錨點在錄製畫面上是獨一無二的"
         return {"checked": True, "rivals": 0, "nearest_rival_px": 0,
                 "scanned": scanned, "phases": counts,
-                "flat": False, "variance": round(variance, 1), "reason": why}
+                "flat": False, "variance": round(variance, 1),
+                "target_score": round(target_score, 3), "best_rival_score": 0.0,
+                "reason": why}
 
     nearest = min(reachable)
     where = "、".join(
@@ -612,9 +644,12 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
         "phases": counts,
         "flat": False,
         "variance": round(variance, 1),
-        "reason": (f"執行時搆得到的相似處有 {len(reachable)} 個（{where}），"
+        "target_score": round(target_score, 3),
+        "best_rival_score": round(best_rival, 3),
+        "reason": (f"有 {len(reachable)} 個地方分數逼近真目標（{where}）："
+                   f"目標 {target_score:.2f} vs 替身 {best_rival:.2f}，"
                    f"最近的在 {nearest}px 外"
-                   + (f"；另有 {scanned - len(reachable)} 個搆不到，不列入"
+                   + (f"；另有 {scanned - len(reachable)} 個差太多或搆不到，不列入"
                       if scanned > len(reachable) else "")),
     }
 

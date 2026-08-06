@@ -316,6 +316,9 @@ export interface AnchorAnalysis {
   /** 錨點幾乎沒有特徵（純色）→ CV 與幻覺守門都對它無效，比有替身更嚴重 */
   flat?: boolean
   variance?: number
+  /** 真目標的比對分數，以及「搶得走的」替身裡最高的那個 */
+  target_score?: number
+  best_rival_score?: number
   reason: string
 }
 
