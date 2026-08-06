@@ -172,16 +172,26 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   // 「這張錨點在錄製當下的畫面上還對得到幾個地方」。>0 代表回放時 CV 有機會
   // 挑錯那一個 —— 而且假匹配分數可以到 0.95 以上，調門檻擋不住。
   // 只提醒、不自動改行為（試過自動鎖搜尋範圍，實測不可行）。
-  const [anchorRisk, setAnchorRisk] = useState<Record<number, { rivals: number; nearest: number }>>({})
+  const [anchorRisk, setAnchorRisk] = useState<Record<number, {
+    rivals: number; nearest: number; scanned: number
+    phases?: { box: number; near: number; fullscreen: number }
+  }>>({})
 
   const runAnchorCheck = async (acts: ComputerUseAction[], dir: string) => {
     if (!acts?.length || !dir) return
     try {
-      const res = await analyzeAnchors(dir, acts as unknown as Record<string, unknown>[])
-      const map: Record<number, { rivals: number; nearest: number }> = {}
+      const res = await analyzeAnchors(dir, acts as unknown as Record<string, unknown>[], {
+        cv_search_radius: data.cvSearchRadius ?? 400,
+        cv_threshold: data.cvThreshold ?? 0.5,
+        cv_search_only_near: data.cvSearchOnlyNear === true,
+      })
+      const map: typeof anchorRisk = {}
       for (const r of res.results) {
         if (r.checked && r.rivals > 0) {
-          map[r.index] = { rivals: r.rivals, nearest: r.nearest_rival_px }
+          map[r.index] = {
+            rivals: r.rivals, nearest: r.nearest_rival_px,
+            scanned: r.scanned ?? r.rivals, phases: r.phases,
+          }
         }
       }
       setAnchorRisk(map)
@@ -621,21 +631,44 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       )}
                     </div>
                     {a.description && <p className="text-xs text-gray-600 mt-0.5 truncate">{a.description}</p>}
-                    {anchorRisk[i] && (
-                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-snug">
-                        ⚠ 這張錨點在錄製當下的畫面上還有 {anchorRisk[i].rivals} 個幾乎一樣的地方
-                        （最近的在 {anchorRisk[i].nearest}px 外）。
-                        視窗如果移動過，回放時可能點到那些地方之一。
-                        <br />
-                        建議擇一：改用 UIA 定位／
-                        <button
-                          type="button"
-                          onClick={() => onUpdate({ cvSearchOnlyNear: true })}
-                          className="underline hover:text-amber-900"
-                        >勾「只搜錄製座標附近」</button>
-                        （找不到就停，不會亂點）／把錨點框大一點含周邊文字。
-                      </p>
-                    )}
+                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
+                        替身在搜尋半徑「內」的話，勾「只搜附近」完全沒用（它本來就在附近），
+                        該做的是縮半徑／拉橘框；只有替身是「退回全螢幕才會撞到」的，
+                        勾「只搜附近」才是正解。 */}
+                    {anchorRisk[i] && (() => {
+                      const r = anchorRisk[i]
+                      const nearRisk = (r.phases?.near || 0) > 0 || (r.phases?.box || 0) > 0
+                      const onlyFullscreen = !nearRisk && (r.phases?.fullscreen || 0) > 0
+                      return (
+                        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-snug">
+                          ⚠ 回放時搜尋範圍內有 {r.rivals} 個長得幾乎一樣的地方
+                          （最近的在 {r.nearest}px 外）。真目標若跑掉，可能改點到那些地方之一。
+                          {r.scanned > r.rivals && (
+                            <span className="text-amber-600">
+                              （畫面上另有 {r.scanned - r.rivals} 個相似處，但執行時搆不到，沒列入）
+                            </span>
+                          )}
+                          <br />
+                          {onlyFullscreen ? (
+                            <>
+                              只有在「橘框和附近都找不到、退回整個桌面」時才會撞到。建議
+                              <button
+                                type="button"
+                                onClick={() => onUpdate({ cvSearchOnlyNear: true })}
+                                className="underline hover:text-amber-900"
+                              >勾「只搜錄製座標附近」</button>
+                              （找不到就停，不會退回全桌面亂點）。
+                            </>
+                          ) : (
+                            <>
+                              它就在搜尋範圍內，所以<strong>勾「只搜附近」沒有用</strong>。
+                              建議擇一：把 CV 搜尋半徑縮到 {r.nearest}px 以內／拖一個橘框把範圍鎖小／
+                              改用 UIA 定位／把錨點框大一點含周邊文字讓它變獨特。
+                            </>
+                          )}
+                        </p>
+                      )
+                    })()}
                     {a.text && <p className="text-xs text-gray-500 mt-0.5 truncate font-mono">"{a.text}"</p>}
                     {a.keys && a.keys.length > 0 && (
                       <p className="text-xs text-gray-500 mt-0.5 font-mono">{a.keys.join('+')}</p>

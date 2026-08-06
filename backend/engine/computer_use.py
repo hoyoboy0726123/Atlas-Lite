@@ -424,24 +424,48 @@ def _parse_search_region(action: dict) -> Optional[tuple[int, int, int, int]]:
 # 門檻用 0.5（跟 CV 預設一致）—— 分數在門檻以上的都是回放時可能被挑中的候選。
 ANCHOR_RIVAL_THRESHOLD = 0.5
 
+# 全桌面 fallback 的最低 CV 門檻（避免大螢幕假匹配點錯位置）。
+# 放模組層級是因為 analyze_anchor_uniqueness 也要用同一個值 —— 兩邊不一致
+# 就會出現「警告說有風險、執行時其實根本搆不到」的假警報。
+_FULLSCREEN_MIN_THRESHOLD = 0.80
+
 
 def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
                               threshold: float = ANCHOR_RIVAL_THRESHOLD,
-                              max_peaks: int = 8) -> dict:
-    """算這張錨點在「錄製當下的整張畫面」上能對上幾個地方。
+                              max_peaks: int = 8,
+                              cv_search_radius: int = 400,
+                              cv_threshold: float = 0.5,
+                              cv_search_only_near: bool = False) -> dict:
+    """算這張錨點在錄製畫面上有幾個替身，**而且執行時真的搆得到**。
 
     為什麼要算：CV 找的是「最像的」。如果畫面上有好幾個長得一樣的東西
     （最典型的就是視窗標題列那三顆按鈕、表格裡重複的圖示），回放時只要
     真目標稍微跑掉，它就會挑中替身點下去 —— 而且分數可以高到 0.95 以上，
     調門檻擋不住。與其執行時猜，不如錄製時就把這件事量出來。
 
+    ⚠ 2026-08-06 修正：這支原本掃「整張截圖、門檻 0.5」就報警，但執行時
+      根本不是那樣搜的，導致大量假警報 —— 實測一個動作報 7 個替身，
+      逐一比對後**沒有任何一個搆得到**（全在 ±400px 外，分數也全部低於
+      全螢幕階段的 0.80 門檻），警告卻叫使用者去改設定。
+      現在改成照 find_template 的三階段逐一判定：
+
+        Phase 1  橘框內       門檻 cv_threshold   —— 沒拉橘框就不執行
+        Phase 2  錄製座標 ±cv_search_radius       門檻 cv_threshold
+        Phase 3  整個桌面     門檻 max(cv_threshold, 0.80)
+                              —— 勾了「只搜附近」或嚴格鎖橘框就不執行
+
+      只有某個階段真的會執行、而且那個替身在該階段的範圍內又過得了該階段
+      門檻，才算數。
+
     用錄製時存的 full_NNN.png（那一刻的整個畫面），不是「現在」的畫面 ——
     現在的畫面跟錄製時可能完全不同，量出來的沒有意義。
 
     回傳：
       checked            有沒有真的算（沒有全螢幕圖就算不了）
-      rivals             除了真目標以外，還有幾個 ≥threshold 的候選
-      nearest_rival_px   最近的那個替身離真目標多遠
+      rivals             **執行時搆得到**的替身數（前端拿它決定要不要警告）
+      nearest_rival_px   這些替身裡最近的那個離真目標多遠
+      scanned            整張畫面上總共找到幾個相似處（含搆不到的）
+      phases             {"box": n, "near": n, "fullscreen": n} 各階段搆得到幾個
       reason             人看的結論
 
     ⚠ 這個函式只負責「量」，不決定執行行為。試過用它自動鎖搜尋半徑，
@@ -450,7 +474,9 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
     import cv2
 
     def _skip(why: str) -> dict:
-        return {"checked": False, "rivals": 0, "nearest_rival_px": 0, "reason": why}
+        return {"checked": False, "rivals": 0, "nearest_rival_px": 0,
+                "scanned": 0, "phases": {"box": 0, "near": 0, "fullscreen": 0},
+                "reason": why}
 
     img_name = (action.get("image") or "").strip()
     full_name = (action.get("full_image") or "").strip()
@@ -497,16 +523,60 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
     # 離點擊點最近的那個峰值視為「真目標」，其餘都是替身
     peaks.sort(key=lambda p: (p[1] - cx) ** 2 + (p[2] - cy) ** 2)
     rivals = peaks[1:]
-    if not rivals:
-        return {"checked": True, "rivals": 0, "nearest_rival_px": 0,
-                "reason": "錨點在錄製畫面上是獨一無二的"}
+    scanned = len(rivals)
 
-    nearest = min(int(((r[1] - cx) ** 2 + (r[2] - cy) ** 2) ** 0.5) for r in rivals)
+    # ── 逐一判定：執行時哪個階段真的搆得到這個替身 ──────────────────
+    # 座標換算：peak 是全螢幕圖的座標，橘框是虛擬桌面的絕對座標
+    off_l = int(action.get("full_left", 0) or 0)
+    off_t = int(action.get("full_top", 0) or 0)
+    box = action.get("search_region") or []
+    has_box = isinstance(box, (list, tuple)) and len(box) == 4 and box[2] > 0 and box[3] > 0
+    cv_strict = bool(action.get("cv_strict_region", False))
+    # 全螢幕階段被關掉的兩種情況（跟 execute_action 的 Phase 3 條件一致）
+    fullscreen_on = not cv_search_only_near and not (cv_strict and has_box)
+    full_min = max(cv_threshold, _FULLSCREEN_MIN_THRESHOLD)
+
+    counts = {"box": 0, "near": 0, "fullscreen": 0}
+    reachable: list[int] = []
+    for val, px, py in rivals:
+        d = int(((px - cx) ** 2 + (py - cy) ** 2) ** 0.5)
+        hit = False
+        if has_box and val >= cv_threshold:
+            l, t, w, h = box[0], box[1], box[2], box[3]
+            if l <= px + off_l <= l + w and t <= py + off_t <= t + h:
+                counts["box"] += 1
+                hit = True
+        # 嚴格鎖橘框時 Phase 2 不會執行
+        if not (cv_strict and has_box) and val >= cv_threshold and d <= cv_search_radius:
+            counts["near"] += 1
+            hit = True
+        if fullscreen_on and val >= full_min:
+            counts["fullscreen"] += 1
+            hit = True
+        if hit:
+            reachable.append(d)
+
+    if not reachable:
+        why = (f"畫面上有 {scanned} 個相似處，但執行時都搆不到"
+               f"（不在搜尋範圍內、或分數低於該階段門檻）" if scanned
+               else "錨點在錄製畫面上是獨一無二的")
+        return {"checked": True, "rivals": 0, "nearest_rival_px": 0,
+                "scanned": scanned, "phases": counts, "reason": why}
+
+    nearest = min(reachable)
+    where = "、".join(
+        n for n, ok in (("橘框內", counts["box"]), ("錄製座標附近", counts["near"]),
+                        ("退回全螢幕時", counts["fullscreen"])) if ok)
     return {
         "checked": True,
-        "rivals": len(rivals),
+        "rivals": len(reachable),
         "nearest_rival_px": nearest,
-        "reason": f"錄製畫面上還有 {len(rivals)} 個長得幾乎一樣的地方，最近的在 {nearest}px 外",
+        "scanned": scanned,
+        "phases": counts,
+        "reason": (f"執行時搆得到的相似處有 {len(reachable)} 個（{where}），"
+                   f"最近的在 {nearest}px 外"
+                   + (f"；另有 {scanned - len(reachable)} 個搆不到，不列入"
+                      if scanned > len(reachable) else "")),
     }
 
 
@@ -1083,7 +1153,6 @@ def execute_action(
             # 3. 全螢幕也找不到 → 退回絕對座標 fallback（下方 else 分支）
             _SETTLE_RETRIES = 2          # 第一次 + 最多 1 次 retry
             _SETTLE_WAIT_MS = 150        # retry 前 sleep
-            _FULLSCREEN_MIN_THRESHOLD = 0.80   # 全桌面 fallback 的最低 CV 門檻(避免大螢幕假匹配點錯)
 
             # 使用者明確指定的搜尋紅框（優先於錄製座標附近搜尋）
             region_rect = _parse_search_region(action)

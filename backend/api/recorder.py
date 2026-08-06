@@ -148,14 +148,19 @@ async def grounding_status(force: bool = False):
 class AnchorAnalyzeRequest(BaseModel):
     assets_dir: str
     actions: list[dict]   # 整個步驟的動作序列（只有 click_image 之類的會被分析）
+    # 步驟層級的 CV 設定。分析必須用「執行時真的會用的那組值」，否則會出現
+    # 「警告說有風險、實際上根本搆不到」的假警報。
+    cv_search_radius: int = 400
+    cv_threshold: float = 0.5
+    cv_search_only_near: bool = False
 
 
 @router.post("/computer-use/assets/analyze-anchors")
 async def analyze_anchors(req: AnchorAnalyzeRequest):
-    """算每張錨點在錄製當下的畫面上「能對上幾個地方」。
+    """算每張錨點在錄製畫面上有幾個替身，而且**執行時真的搆得到**。
 
-    錄製完自動跑一次。畫面上有替身的錨點會拿到一個建議搜尋半徑，
-    前端顯示出來讓使用者知道並可調整 —— 這種事不該悄悄發生。
+    錄製完自動跑一次。只有真的有風險才回報 —— 早期版本掃整張圖就報警，
+    結果報一堆執行時根本碰不到的位置，反而害使用者去改不該改的設定。
     """
     from engine.computer_use import analyze_anchor_uniqueness
 
@@ -171,7 +176,13 @@ async def analyze_anchors(req: AnchorAnalyzeRequest):
             if not isinstance(a, dict) or not (a.get("image") or "").strip():
                 out.append({"index": i, "checked": False, "reason": "非錨點動作"})
                 continue
-            r = analyze_anchor_uniqueness(assets, a)
+            r = analyze_anchor_uniqueness(
+                assets, a,
+                cv_search_radius=req.cv_search_radius,
+                cv_threshold=float(a.get("confidence") or req.cv_threshold),
+                cv_search_only_near=bool(a.get("cv_search_only_near",
+                                               req.cv_search_only_near)),
+            )
             r["index"] = i
             out.append(r)
         return out

@@ -306,8 +306,13 @@ export async function getGroundingStatus(): Promise<GroundingStatus> {
 export interface AnchorAnalysis {
   index: number
   checked: boolean
+  /** 執行時「真的搆得到」的相似處數量（不是整張畫面的總數） */
   rivals: number
   nearest_rival_px: number
+  /** 整張錄製畫面上掃到的相似處總數（含執行時搆不到的） */
+  scanned?: number
+  /** 各階段各有幾個搆得到，決定要給什麼建議 */
+  phases?: { box: number; near: number; fullscreen: number }
   reason: string
 }
 
@@ -315,11 +320,14 @@ export interface AnchorAnalysis {
 export async function analyzeAnchors(
   assetsDir: string,
   actions: Record<string, unknown>[],
+  cv?: { cv_search_radius?: number; cv_threshold?: number; cv_search_only_near?: boolean },
 ): Promise<{ results: AnchorAnalysis[] }> {
+  // 一定要把步驟層級的 CV 設定帶過去 —— 分析要用「執行時真的會用的那組值」，
+  // 否則會報一堆執行時根本碰不到的假警報。
   const res = await fetch(`${BASE}/computer-use/assets/analyze-anchors`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ assets_dir: assetsDir, actions }),
+    body: JSON.stringify({ assets_dir: assetsDir, actions, ...(cv || {}) }),
   })
   if (!res.ok) throw new Error(await _readErrorDetail(res))
   return res.json()
