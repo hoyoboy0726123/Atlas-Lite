@@ -1,0 +1,52 @@
+# 範例 3：輸出檔案 + Switch 多分支 + schema 驗證
+#
+# 情境：產生一份 JSON 報表，用 schema 確認格式沒跑掉，再依狀態分派。
+#
+# 重點：
+#   1. output.path 指向 .json → 裡面的**純量欄位自動開放**給下游引用，
+#      不需要再寫一份 _step_export.json。
+#   2. output.json_schema 是唯一的輸出驗證機制。0 成本、錯在哪一欄講得清楚，
+#      比讓下游步驟拿到爛資料再爆掉好得多。
+#   3. Switch 模式：switch 求出一個值，cases 對照跳轉，沒命中走 default。
+
+name: 範例3-輸出檔案與驗證
+
+steps:
+  - name: 產生報表
+    batch: >
+      python -c "import json, os, random;
+      st = random.choice(['ok', 'partial', 'failed']);
+      json.dump({'status': st, 'rows': random.randint(0, 500), 'note': 'demo'},
+      open(os.path.join(os.environ['PIPELINE_OUTPUT_DIR'], 'report.json'), 'w'));
+      print('報表已產生：' + st)"
+    output:
+      path: report.json
+      # 格式不符會讓這一步 FAIL，錯誤訊息會指出是哪一欄
+      json_schema:
+        type: object
+        required: [status, rows]
+        properties:
+          status: { type: string }
+          rows: { type: integer }
+
+  # ── Switch 模式：一個值對應多個分支 ──
+  - name: 依狀態分派
+    condition: true
+    switch: "{{ steps.產生報表.output.status }}"
+    cases:
+      ok: 正常出貨
+      partial: 人工確認
+    default: 記錄失敗       # 沒命中任何 case 就走這裡
+
+  - name: 正常出貨
+    batch: python -c "print('全部 {{ steps.產生報表.output.rows }} 筆正常，直接出貨')"
+    next: end
+
+  # ── 人工確認節點：暫停等人點頭，可推播到 Telegram ──
+  - name: 人工確認
+    human_confirm: true
+    message: "報表狀態是 partial（{{ steps.產生報表.output.rows }} 筆），要繼續嗎？"
+    next: end
+
+  - name: 記錄失敗
+    batch: python -c "print('狀態 {{ steps.產生報表.output.status }}，記錄後結束')"

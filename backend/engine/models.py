@@ -239,6 +239,8 @@ class PipelineStep(BaseModel):
     # Switch 模式：switch + cases（忽略 expression）
     #   switch: "{{ steps.api.output.status }}"
     #   cases: { "200": ok_step, "404": retry_step }
+    # 註：output.<欄位> 撞名時（status / path / stdout / stderr / exit_code）
+    #     以「你輸出的值」為準；要取步驟自己的執行狀態請寫 output.step.status。
     condition: bool = False
     expression: str = ""
     on_true: str = ""

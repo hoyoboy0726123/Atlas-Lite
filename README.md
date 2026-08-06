@@ -32,6 +32,13 @@ output:
   json_schema: { type: object, required: [rows], properties: { rows: { type: integer } } }
 ```
 
+> 引用語法是 `{{ steps.<步驟名>.output.<欄位> }}`,中間那個 `.output.` 不能省。
+> 欄位名若剛好是 `status` / `path` / `stdout` / `stderr` / `exit_code`,
+> `output.<欄位>` 拿到的是**你的值**;步驟自己的執行狀態請用 `output.step.<欄位>`。
+
+可以跑的完整範例在 [`examples/`](examples/):步驟間傳值、IF 分支、Switch + schema 驗證。
+側邊欄「匯入」直接選那些 `.yaml` 就能跑。
+
 ---
 
 ## 跟 Atlas 的關係

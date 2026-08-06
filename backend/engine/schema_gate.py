@@ -37,7 +37,14 @@ def validate_output_schema(path: str, schema: dict) -> Tuple[bool, str]:
     try:
         import jsonschema
     except ImportError:
-        return True, ""  # 套件缺 → 不擋(degrade gracefully),但正常安裝都有
+        # ⚠ 不能靜默放行。2026-08-06 實測：jsonschema 沒被列進 requirements.txt，
+        #   於是每個 json_schema 合約都走這條路 return True，型別完全錯誤還印
+        #   「✅ schema 合約通過」—— 使用者以為有驗證，實際上一個都沒驗。
+        #   宣告了合約卻驗不了，就該讓這一步失敗，而不是假裝通過。
+        return False, ("缺少 jsonschema 套件，無法驗證 output.json_schema 合約。"
+                       "請在後端環境執行：pip install jsonschema"
+                       "（或重跑 launch.bat 讓它依 requirements.txt 補裝）。"
+                       "不移除這個錯誤是刻意的 —— 宣告了驗證卻靜默跳過比不驗更危險。")
 
     validator_cls = jsonschema.validators.validator_for(schema)
     try:

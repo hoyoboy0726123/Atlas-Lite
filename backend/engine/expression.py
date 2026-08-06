@@ -11,12 +11,19 @@ Context 結構:
         "steps": {
             "<step_name>": {
                 "output": {
+                    # 步驟中繼資料（撞名時會被使用者資料蓋掉，見下面 step）
                     "path": "...",        # actual_output_path
                     "stdout": "...",      # stdout_tail
                     "stderr": "...",
                     "exit_code": 0,
-                    "status": "ok",
-                    "<save_as_var>": ...,  # step_vars promote 到 output
+                    "status": "ok",       # 步驟驗證狀態
+                    # 使用者資料攤平到這一層；**撞名時使用者資料優先**
+                    "<save_as_var>": ...,   # _step_export.json / save_as
+                    "<json_field>": ...,    # .json 輸出檔的純量欄位
+                    # 三個永遠正確、不受撞名影響的 namespace：
+                    "step": {...},   # 步驟中繼資料原樣（path/stdout/status…）
+                    "vars": {...},   # _step_export.json / save_as 原樣
+                    "json": {...},   # .json 輸出檔原樣
                 }
             },
             ...
@@ -27,6 +34,7 @@ Context 結構:
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any, Optional
@@ -210,6 +218,14 @@ def _load_json_output(path: str) -> Any:
     return data
 
 
+log = logging.getLogger("atlas_lite")
+
+# output namespace 的固定 key（步驟中繼資料）。
+# 撞名時**使用者資料贏** —— output.status 讀起來就該是「我輸出的 status」。
+# 步驟自己的值永遠可從 output.step.<key> 取得，不會遺失。
+_FIXED_OUTPUT_KEYS = {"stdout", "stderr", "exit_code", "path", "status"}
+
+
 def build_context(*, step_results=None, input_params=None,
                   env_passthrough: bool = True) -> dict:
     """組裝 render context: {steps, input, env}。
@@ -229,12 +245,39 @@ def build_context(*, step_results=None, input_params=None,
                 "path": getattr(sr, "actual_output_path", "") or "",
                 "status": getattr(sr, "validation_status", "") or "",
             }
+            # ⚠ 撞名問題（2026-08-06 實測）：使用者資料的欄位名如果跟上面那五個
+            #   固定 key 一樣（status / path / stdout / stderr / exit_code），
+            #   固定 key 會贏，使用者拿到的是「步驟中繼資料」而不是自己的值 ——
+            #   而且完全沒有提示。實測 _step_export.json 寫 status='failed'，
+            #   {{ steps.X.output.status }} 卻求出 'ok'（步驟執行狀態），
+            #   switch 因此走錯分支。
+            #   固定 key 不能讓位（output.path 有功能在用），但一定要出聲，
+            #   並告訴使用者怎麼拿到自己的值。
+            # 步驟中繼資料永遠留一份在 output.step.<key>，不受撞名影響
+            out["step"] = dict(out)
+            _shadowed: list[str] = []
+
+            def _promote(src: dict) -> None:
+                """把使用者資料攤平到 output.<key>。
+
+                ⚠ 撞名時**使用者資料贏**。2026-08-06 實測：以前是固定 key 贏，
+                  結果腳本輸出 status='failed'，{{ steps.X.output.status }} 卻求出
+                  'ok'（那是步驟執行狀態），switch 因此走到 ok 分支 ——
+                  完全沒有任何提示。而 status 是極常見的欄位名。
+                  `output.status` 讀起來就該是「我輸出的 status」，所以讓使用者贏；
+                  步驟自己的中繼資料改從 output.step.<key> 取，一樣拿得到。
+                """
+                for k, v in src.items():
+                    if not isinstance(k, str):
+                        continue
+                    if k in _FIXED_OUTPUT_KEYS and out.get(k) != v:
+                        _shadowed.append(k)
+                    out[k] = v
+
             # save_as / step_vars promote 到 output namespace
             sv = getattr(sr, "step_vars", None) or {}
-            for k, v in sv.items():
-                # 不覆寫上面的固定 key(stdout / path 等)
-                if k not in out:
-                    out[k] = v
+            out["vars"] = dict(sv)          # 永遠拿得到，不受撞名影響
+            _promote(sv)
             # 把該步「JSON 輸出檔」的欄位提供給下游 condition/switch:
             #   - 完整物件掛 output.json.<key>(永遠可用、不會與 stdout/path/status 等固定 key 衝突)
             #   - 同時攤平到 output.<key>(讓 AI 助手直覺寫 output.口碑 即可用),但不覆寫固定 key/step_vars
@@ -242,9 +285,11 @@ def build_context(*, step_results=None, input_params=None,
             _jdata = _load_json_output(out.get("path") or "")
             if isinstance(_jdata, dict):
                 out["json"] = _jdata
-                for _k, _v in _jdata.items():
-                    if isinstance(_k, str) and _k not in out:
-                        out[_k] = _v
+                _promote(_jdata)
+            if _shadowed:
+                log.info(
+                    f"[{sr.step_name}] 輸出欄位 {sorted(set(_shadowed))} 跟步驟中繼資料同名，"
+                    f"`output.<欄位>` 用你的值；步驟本身的值請用 `output.step.<欄位>`。")
             steps_ns[sr.step_name] = {"output": out}
 
     ctx: dict[str, Any] = {

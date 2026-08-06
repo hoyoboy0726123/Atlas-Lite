@@ -1,0 +1,30 @@
+# 範例 1：腳本把值傳給下游步驟
+#
+# 情境：抓一批資料 → 下一步依「抓到幾筆」決定要不要處理。
+#
+# 重點：腳本不用 import 任何 Atlas-Lite 的東西。只要在自己的工作目錄寫一個
+#       扁平的 _step_export.json，下游就能用 {{ steps.<步驟名>.output.<欄位> }} 引用。
+#
+# 匯入方式：側邊欄「匯入」→ 選這個檔案。或直接複製到編輯器的 YAML 分頁。
+
+name: 範例1-步驟間傳資料
+
+steps:
+  # ── 第 1 步：產生資料，並把「幾筆」與「狀態」交給下游 ──
+  - name: 抓資料
+    batch: >
+      python -c "import json, random;
+      rows = random.randint(50, 200);
+      json.dump({'rows': rows, 'status': 'ok', 'source': 'demo'},
+      open('_step_export.json', 'w'));
+      print(f'抓到 {rows} 筆')"
+
+  # ── 第 2 步：直接引用上一步匯出的變數 ──
+  # steps.抓資料.output.rows 就是上面寫進 _step_export.json 的 rows
+  - name: 顯示筆數
+    batch: python -c "print('上一步抓到 {{ steps.抓資料.output.rows }} 筆，狀態 {{ steps.抓資料.output.status }}')"
+
+  # ── 第 3 步：stdout 也能引用（不用經過 _step_export.json）──
+  # 適合只想把一行訊息帶下去、懶得寫 JSON 的情況
+  - name: 引用上一步輸出
+    batch: python -c "print('前一步印的是：{{ steps.顯示筆數.output.stdout | trim }}')"

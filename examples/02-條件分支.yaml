@@ -1,0 +1,33 @@
+# 範例 2：依上一步的數值走不同分支
+#
+# 情境：抓到的資料量足夠才做完整處理，太少就只發個通知。
+#
+# 重點：
+#   1. condition 節點用 Jinja2 求值，不是 eval、也不是 LLM。
+#   2. 分支跑完要用 next: end 跳出，否則會線性掉進另一個分支。
+#      （這是最容易踩的坑：YAML 是有順序的，condition 只決定「跳去哪」，
+#        不會自動幫你跳過後面那個分支。）
+
+name: 範例2-條件分支
+
+steps:
+  - name: 抓資料
+    batch: >
+      python -c "import json, random;
+      rows = random.randint(0, 200);
+      json.dump({'rows': rows}, open('_step_export.json', 'w'));
+      print(f'抓到 {rows} 筆')"
+
+  # ── IF 模式：expression 求值 → on_true / on_false ──
+  - name: 資料夠多嗎
+    condition: true
+    expression: "{{ steps.抓資料.output.rows | int > 100 }}"
+    on_true: 完整處理
+    on_false: 資料太少
+
+  - name: 完整處理
+    batch: python -c "print('資料量 {{ steps.抓資料.output.rows }} > 100，跑完整流程')"
+    next: end        # ← 沒有這行會繼續往下跑進「資料太少」
+
+  - name: 資料太少
+    batch: python -c "print('只有 {{ steps.抓資料.output.rows }} 筆，跳過處理')"

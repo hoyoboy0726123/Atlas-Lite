@@ -25,6 +25,10 @@ pyyaml==6.0.2
 sqlalchemy==2.0.36
 # condition 節點求值 + {{ }} 變數插值。用 StrictUndefined，不用 eval。
 jinja2>=3.1.0
+# output.json_schema 的驗證引擎。
+# ⚠ 這個不是選用的：schema_gate 是唯一的輸出結構驗證機制，缺了它會讓
+#   所有 json_schema 合約靜默失效（2026-08-06 實測：型別完全錯誤也印「通過」）。
+jsonschema>=4.0.0
 # Secrets Vault：憑證用 Fernet 加密存 SQLite，工作流用 {{ secrets.名稱 }} 引用，
 # 不用把 API key 明文寫進 YAML。
 cryptography
