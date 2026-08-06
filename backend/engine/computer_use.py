@@ -546,8 +546,13 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
             if l <= px + off_l <= l + w and t <= py + off_t <= t + h:
                 counts["box"] += 1
                 hit = True
-        # 嚴格鎖橘框時 Phase 2 不會執行
-        if not (cv_strict and has_box) and val >= cv_threshold and d <= cv_search_radius:
+        # 嚴格鎖橘框時 Phase 2 不會執行。
+        # ⚠ near_xy 是**方形**範圍（x、y 各 ±search_radius），不是圓形 ——
+        #   這裡若用歐氏距離判斷，方形四個角落的替身會被誤判成「搆不到」，
+        #   那是假陰性（該警告卻沒警告），比假警報危險得多。
+        in_near = (abs(px - cx) <= cv_search_radius
+                   and abs(py - cy) <= cv_search_radius)
+        if not (cv_strict and has_box) and val >= cv_threshold and in_near:
             counts["near"] += 1
             hit = True
         if fullscreen_on and val >= full_min:
