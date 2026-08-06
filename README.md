@@ -2,7 +2,7 @@
 
 **Windows 桌面自動化(RPA)+ Python 腳本流程引擎。零 LLM 也能完整運作。**
 
-從 [Atlas](../Atlas) 抽取而來,只保留四種節點:
+從姊妹專案 Atlas(AI 工作流編排)抽取而來,只保留四種節點:
 
 | 節點 | 做什麼 |
 |---|---|
@@ -47,7 +47,7 @@ Atlas-Lite 是**獨立專案**,不是 Atlas 的模組或 submodule:
 | | Atlas | **Atlas-Lite** |
 |---|---|---|
 | 定位 | AI 工作流編排(LLM 為核心) | **純自動化執行引擎** |
-| LLM | 必要 | **完全不需要** |
+| LLM | 必要 | **核心功能不需要**(選用的視覺模型可跑地端) |
 | 沙盒(WSL+Docker) | skill 節點需要 | **不需要** |
 | 後端埠 | 8014 | 8020 |
 | 前端埠 | 3012 | 3020 |
@@ -85,8 +85,8 @@ LLM 在原專案裡負責的是「**產生**工作流」與「**看圖判斷**�
 
 ### 關於「不需要 API Key」
 
-**核心功能一個金鑰都不用**,不是「先不填、之後要填」的意思。`.env` 唯一的憑證是
-選填的 Telegram bot token。
+**核心功能一個金鑰都不用**,不是「先不填、之後要填」的意思。`backend/.env` 唯一
+必要的憑證是選填的 Telegram bot token。
 
 唯一會用到模型的兩個地方都是**選用**的,而且**兩個都可以完全跑在地端**:
 
@@ -251,7 +251,8 @@ Atlas 這個問題是丟給雲端模型挑圖(`anchor_pick`)解的。純 CV 又�
 
 Ollama 要先 `ollama pull qwen2.5vl:7b`。
 
-金鑰可以在設定頁填,也可以放 `.env` —— **每家一把,用各家官方的變數名**:
+金鑰可以在設定頁填,也可以放 `backend/.env`(範本見 `backend/.env.example`)
+—— **每家一把,用各家官方的變數名**:
 
 ```dotenv
 OPENAI_API_KEY=sk-...
@@ -285,7 +286,8 @@ launch.bat
 launch.bat --no-frontend
 ```
 
-不填任何設定就能用 —— 沒有 API 金鑰要準備。`.env` 只有 Telegram 與路徑,全部選填。
+不填任何設定就能用 —— 沒有 API 金鑰要準備。設定範本在 `backend/.env.example`,
+裡面全部是選填項(Telegram、時區、路徑、以及選用的視覺模型)。
 
 ---
 
@@ -320,4 +322,4 @@ launch.bat --no-frontend
 
 ## 授權
 
-TBD
+[MIT](LICENSE)
