@@ -574,6 +574,64 @@ def verify_grounding_desc(assets_dir: Path, action: dict, desc: str) -> tuple[bo
     return (False, d, f"這段描述會定位到別的地方（離錄製位置 {d:.0f}px）")
 
 
+def _strip_json_fence(s: str) -> str:
+    """模型愛把 JSON 包在 ```json ... ``` 裡，剝掉。"""
+    t = s.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[-1] if "\n" in t else t[3:]
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return t.strip()
+
+
+def _vlm_describe_to_text(prompt: str, region: Optional[tuple[int, int, int, int]],
+                          logger: logging.Logger) -> tuple[bool, str, str]:
+    """vlm_mode='description' 用：把螢幕送視覺模型，請它回目標的「實際文字」。
+
+    座標仍由後續 OCR 決定 —— 模型只負責「要找什麼字」，不負責「在哪裡」。
+    這正是這個模式存在的理由：通用視覺模型給座標不準（實測會指到隔壁），
+    但「讀出畫面上這行字是什麼」它很行。
+
+    回 (found, target_text, reason)。
+    """
+    from . import vlm_cloud
+
+    screen, ox, oy = _capture_screen()
+    if region is not None:
+        l, t, w, h = region
+        x, y = max(0, l - ox), max(0, t - oy)
+        x_end = min(screen.shape[1], x + w)
+        y_end = min(screen.shape[0], y + h)
+        if x_end <= x or y_end <= y:
+            return (False, "", f"裁切區域 {(l, t, w, h)} 與螢幕無交集")
+        screen = screen[y:y_end, x:x_end]
+
+    sys_msg = ("你是 UI 視覺助手。看到的圖是螢幕當下狀態。回 JSON："
+               '{"found": true/false, "text": "目標的實際文字", "reason": "簡短說明"}。'
+               'text 必須是螢幕上「實際看得到」的字串（含大小寫和標點），不是描述、不是同義詞。'
+               "只回 JSON。")
+    user_text = (f"使用者描述要點擊的目標：「{prompt}」\n"
+                 "請看圖，找出符合此描述的 UI 元素，告訴我它身上實際顯示的文字"
+                 "（等一下會用這段文字做 OCR 定位）。畫面上找不到就回 found=false。")
+
+    ok, raw, err = vlm_cloud.ask_with_image(user_text, sys_msg, screen, logger)
+    if not ok:
+        return (False, "", err)
+    try:
+        data = json.loads(_strip_json_fence(raw))
+    except json.JSONDecodeError:
+        return (False, "", f"視覺模型的回應不是 JSON：{raw[:200]}")
+    if not isinstance(data, dict):
+        return (False, "", f"視覺模型回了 JSON 但不是物件：{raw[:150]}")
+    found = bool(data.get("found", False))
+    text = str(data.get("text") or "").strip()
+    reason = str(data.get("reason") or "").strip() or "(無說明)"
+    if found and not text:
+        return (False, "", f"模型說找到了但沒給文字：{reason}")
+    logger.info(f"[vlm_describe] found={found} text={text!r} reason={reason[:120]}")
+    return (found, text, reason)
+
+
 def _pyautogui_with_failsafe():
     """lazy import pyautogui 並設好 failsafe / 節流"""
     import pyautogui
@@ -669,6 +727,20 @@ def execute_action(
             if not img_name:
                 return ActionResult(False, index, atype, "click_image 缺 image 欄位")
             tpl_path = assets_dir / img_name
+            # 多形態錨點：同一顆按鈕的不同樣子（最大化↔還原、亮↔暗主題）。
+            # 每張都比一次取最高分 —— 取代 Atlas 靠雲端模型挑圖的 anchor_pick。
+            _variants = [v for v in (action.get("image_variants") or [])
+                         if isinstance(v, str) and v.strip()]
+            tpl_candidates: list[tuple[str, Path]] = [(img_name, tpl_path)]
+            for _v in _variants:
+                _vp = assets_dir / _v
+                if _vp.is_file():
+                    tpl_candidates.append((_v, _vp))
+                else:
+                    logger.warning(f"[computer_use]   多形態錨點 {_v} 檔案不存在，略過")
+            if len(tpl_candidates) > 1:
+                logger.info(f"[computer_use]   多形態錨點：共 {len(tpl_candidates)} 張候選"
+                            f"（{', '.join(n for n, _ in tpl_candidates)}）")
             # 門檻：action-level confidence 覆蓋 step 層級 cv_threshold，皆缺就用 0.5
             threshold = float(action.get("confidence") or cv_threshold)
             button = action.get("button", "left")
@@ -758,18 +830,68 @@ def execute_action(
                 logger.info(f"[computer_use]   [UIA-first] 跳過 — 使用者顯式選了 {_chosen} primary, 尊重使用者")
 
             # ── VLM 模式 1：description → OCR ──
-            # bug 修補：之前讀錯欄位（讀紅框 search_region），這個模式既然走 OCR，
-            # 區域就應該讀使用者在編輯器拉的「藍框」（ocr_box_*），跟純 OCR 路徑一致
-            # ── VLM 模式 description：Atlas-Lite 不支援 ──
-            # 原本是「雲端 VLM 看圖回目標的實際文字 → 交給 OCR 定位」。
-            # Atlas-Lite 不帶任何雲端 LLM，這個模式沒有實作。
-            # 明確報錯而不是靜默跳過 —— 從 Atlas 匯入的舊工作流若用了這個模式，
-            # 使用者要當場知道，不能讓它默默走到別的路徑去點錯東西。
+            # 適用場景：畫面上的文字是動態的（訂單編號、當日日期、使用者名稱），
+            # 錄製當下不知道回放時會是什麼字，所以 ocr_text 沒得填。
+            # 做法是模型看圖回「目標實際顯示的文字」，座標仍交給 OCR 決定 ——
+            # 模型不碰座標，就不會出現「指到隔壁那顆」的問題。
+            #
+            # 區域讀使用者拉的「藍框」（ocr_box_*）而不是紅框（search_region）：
+            # 這個模式最終走 OCR，範圍語意要跟純 OCR 路徑一致。
             if vlm_mode == "description":
-                return ActionResult(False, index, atype,
-                    "vlm_mode='description' 需要雲端 VLM，Atlas-Lite 不支援。"
-                    "請改用 vlm_mode='grounding'（地端定位模型），"
-                    "或改用 use_ocr + ocr_text 直接指定要找的文字。")
+                vlm_prompt_click = (action.get("vlm_prompt") or action.get("description") or "").strip()
+                if not vlm_prompt_click:
+                    return ActionResult(False, index, atype,
+                        "vlm_mode=description 但 vlm_prompt 為空（必填，描述要點什麼）")
+                # 沒設定視覺模型就明確講清楚，不要靜默退回別的定位方式去點錯東西
+                from . import vlm_cloud
+                _cap = vlm_cloud.capability()
+                if not _cap["available"]:
+                    return ActionResult(False, index, atype,
+                        f"vlm_mode=description 需要視覺模型，但{_cap['reason']}。{_cap['hint']}")
+
+                _vlm_box_w = int(action.get("ocr_box_width", 0) or 0)
+                _vlm_box_h = int(action.get("ocr_box_height", 0) or 0)
+                vlm_region: Optional[tuple[int, int, int, int]] = None
+                if _vlm_box_w > 0 and _vlm_box_h > 0:
+                    vlm_region = (
+                        int(action.get("ocr_box_left", 0) or 0),
+                        int(action.get("ocr_box_top", 0) or 0),
+                        _vlm_box_w,
+                        _vlm_box_h,
+                    )
+                vlm_found, vlm_text, vlm_reason = _vlm_describe_to_text(
+                    vlm_prompt_click, vlm_region, logger)
+                if not vlm_found:
+                    return ActionResult(False, index, atype,
+                        f"視覺模型在螢幕上找不到目標：{vlm_reason}")
+
+                find_text_on_screen = None
+                try:
+                    from .ocr import find_text_on_screen
+                except Exception as _e:
+                    return ActionResult(False, index, atype,
+                        f"視覺模型給了文字 '{vlm_text}' 但 OCR 模組載不進來：{_e}")
+                screen_bgr_v, sxv, syv = _capture_screen()
+                near_v = (int(fx), int(fy)) if has_coord else None
+                ocr_res_v = find_text_on_screen(
+                    screen_bgr_v, vlm_text, origin_x=sxv, origin_y=syv,
+                    lang_tag="zh-Hant-TW", near_xy=near_v,
+                    search_radius=cv_search_radius, threshold=ocr_threshold,
+                    region=vlm_region,
+                    strict_region=bool(action.get("ocr_strict_region", False)),
+                )
+                if not ocr_res_v.found:
+                    return ActionResult(False, index, atype,
+                        f"視覺模型看到的目標文字是 '{vlm_text}'（{vlm_reason[:60]}），"
+                        f"但 OCR 在螢幕上找不到這段文字：{ocr_res_v.reason}")
+                _do_click(pg, ocr_res_v.center[0], ocr_res_v.center[1],
+                          button, clicks, hold_sec, modifiers)
+                hold_tag_v = f" hold={hold_sec}s" if hold_sec > 0.1 else ""
+                msg = (f"{mods_tag} 描述→OCR 點擊 '{vlm_text}' @ {ocr_res_v.center} "
+                       f"(模型: {vlm_reason[:60]}, OCR conf={ocr_res_v.confidence:.2f}){hold_tag_v}")
+                duration = int((time.time() - t0) * 1000)
+                logger.info(f"[computer_use]   ✓ {msg}（{duration}ms）")
+                return ActionResult(True, index, atype, msg, duration)
 
             # ── VLM 模式 3：grounding → 地端 GUI 定位模型直接給座標 ──
             # 這是唯一一個「VLM 真的決定座標」的模式，前提是用**專門訓練過 GUI 定位**
@@ -995,14 +1117,33 @@ def execute_action(
                     use_region = force_region
                 eff_threshold = threshold if threshold_override is None else threshold_override
 
-                def _find(m: str) -> MatchResult:
+                def _find_one(p: str, m: str) -> MatchResult:
                     if use_region is not None:
-                        return find_template(str(tpl_path), threshold=eff_threshold, multi_scale=True,
+                        return find_template(p, threshold=eff_threshold, multi_scale=True,
                                              region=use_region, mode=m)
                     if nx_ is not None and ny_ is not None:
-                        return find_template(str(tpl_path), threshold=eff_threshold, multi_scale=True,
+                        return find_template(p, threshold=eff_threshold, multi_scale=True,
                                              near_xy=(nx_, ny_), search_radius=cv_search_radius, mode=m)
-                    return find_template(str(tpl_path), threshold=eff_threshold, multi_scale=True, mode=m)
+                    return find_template(p, threshold=eff_threshold, multi_scale=True, mode=m)
+
+                def _find(m: str) -> MatchResult:
+                    """單張錨點時就是一次比對；多形態時每張都比、取分數最高的。
+
+                    取最高分而不是「第一張過門檻就用」—— 兩張候選都可能勉強過門檻，
+                    但只有一張是畫面當下真正的樣子，分數差距才分得出來。
+                    """
+                    best = _find_one(str(tpl_candidates[0][1]), m)
+                    if len(tpl_candidates) == 1:
+                        return best
+                    best_name = tpl_candidates[0][0]
+                    for _nm, _p in tpl_candidates[1:]:
+                        r = _find_one(str(_p), m)
+                        if r.confidence > best.confidence:
+                            best, best_name = r, _nm
+                    if best_name != img_name:
+                        logger.info(f"[computer_use]   多形態錨點[{m}]：採用 {best_name}"
+                                    f"（conf={best.confidence:.2f}）")
+                    return best
                 gray = _find("gray")
                 if gray.found:
                     return gray
@@ -1693,8 +1834,8 @@ def validate_action_assets(actions: list[dict], assets_dir: Path) -> list[str]:
                 seen.add(name)
                 if not (assets_dir / name).is_file():
                     missing.append(name)
-            # vlm_mode=anchor_pick 用的多張候選錨點圖也要檢查
-            for name in (a.get("vlm_anchors") or []):
+            # 多形態錨點 + 相容用的 anchor_pick 候選圖，一樣要檢查
+            for name in list(a.get("image_variants") or []) + list(a.get("vlm_anchors") or []):
                 if not name or name in seen:
                     continue
                 seen.add(name)

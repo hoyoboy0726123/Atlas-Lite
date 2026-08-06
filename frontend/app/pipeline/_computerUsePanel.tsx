@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ComputerUseData, ComputerUseNode, ComputerUseAction } from './_helpers'
@@ -15,8 +16,10 @@ import {
   verifyGroundingDesc as verifyGroundingDescApi,
   analyzeAnchors,
   getGroundingStatus,
+  getVlmSettings,
+  listAssetFiles,
 } from '@/lib/api'
-import type { GroundingStatus } from '@/lib/api'
+import type { GroundingStatus, VlmSettings } from '@/lib/api'
 import AnchorEditorModal from './_anchorEditorModal'
 import UiaInspectorPanel from './_uiaInspectorPanel'
 import { assetImageUrl } from '@/lib/api'
@@ -218,15 +221,37 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     onUpdate({ actions: next })
   }
   const [editingAnchor, setEditingAnchor] = useState<number | null>(null)
+  // 多形態錨點：assets_dir 內的所有錨點圖（懶載入，展開選圖時才抓）
+  const [assetFiles, setAssetFiles] = useState<string[] | null>(null)
+  const [variantOpenIdx, setVariantOpenIdx] = useState<number | null>(null)
+  const openVariantPicker = async (idx: number) => {
+    if (variantOpenIdx === idx) { setVariantOpenIdx(null); return }
+    setVariantOpenIdx(idx)
+    if (assetFiles !== null) return
+    try {
+      const res = await listAssetFiles(data.assetsDir || defaultAssetsDir)
+      setAssetFiles(res.files.map(f => f.name))
+    } catch {
+      setAssetFiles([])
+    }
+  }
+  const toggleVariant = (idx: number, name: string) => {
+    const cur = (data.actions?.[idx]?.image_variants || []) as string[]
+    const next = cur.includes(name) ? cur.filter(v => v !== name) : [...cur, name]
+    applyAnchorPatch(idx, { image_variants: next })
+  }
   // 描述驗證進行中的動作索引（null = 沒在跑）
   const [describingIdx, setDescribingIdx] = useState<number | null>(null)
   // 每個動作的描述驗證結果：'OK:...' 通過 / 'SKIP:...' 沒驗到 / 其他 = 沒過的原因
   const [descVerify, setDescVerify] = useState<Record<number, string | null>>({})
   // 這台機器能不能用「直接定位」（需要外掛 + NVIDIA GPU + 已下載模型）
   const [gStatus, setGStatus] = useState<GroundingStatus | null>(null)
+  // 有沒有設定視覺模型（給「描述→OCR」用）。沒設 → 那個選項反灰。
+  const [vlmCfg, setVlmCfg] = useState<VlmSettings | null>(null)
   useEffect(() => {
     let alive = true
     getGroundingStatus().then(s => { if (alive) setGStatus(s) }).catch(() => {})
+    getVlmSettings().then(s => { if (alive) setVlmCfg(s) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -625,25 +650,31 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                                    不會讓整步掛掉。需要 NVIDIA GPU + 安裝外掛。
                         （Atlas 另有兩種雲端 VLM 模式，Atlas-Lite 不帶雲端 LLM，沒有。）*/}
                     {a.type === 'click_image' && (() => {
-                      const vlmMode = (a.vlm_mode || 'off') as 'off' | 'grounding'
+                      const vlmMode = (a.vlm_mode || 'off') as 'off' | 'grounding' | 'description'
                       const locked = gStatus !== null && !gStatus.available
+                      const descLocked = vlmCfg !== null && !vlmCfg.available
                       return (
                         <div className="mt-1 space-y-1">
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-[10px] text-gray-500 mr-0.5">地端定位：</span>
+                            <span className="text-[10px] text-gray-500 mr-0.5">視覺輔助：</span>
                             {([
-                              { v: 'off',       label: '關',       hint: '走原本 UIA / CV / OCR / 座標' },
-                              { v: 'grounding', label: '直接定位', hint: '地端 GUI 定位模型直接給座標（連 CV 都點不準時用）。第一次呼叫要載入模型約 30 秒，之後每次約 2-7 秒。失敗自動退回 CV' },
+                              { v: 'off',         label: '關',        hint: '走原本 UIA / CV / OCR / 座標' },
+                              { v: 'grounding',   label: '直接定位',  hint: '地端 GUI 定位模型直接給座標（連 CV 都點不準時用）。第一次呼叫要載入模型約 30 秒，之後每次約 2-7 秒。失敗自動退回 CV' },
+                              { v: 'description', label: '描述→OCR', hint: '畫面上的文字是動態的、錄製時不知道會是什麼字（訂單編號、當日日期）時用。模型看圖回「目標實際顯示的文字」，座標交給 OCR 決定 —— 模型不碰座標，所以不會點到隔壁那顆。需要在設定頁指定視覺模型' },
                             ] as const).map(opt => {
                               // 條件不足時停用而不是藏起來 —— 藏起來使用者永遠不知道有這功能
-                              const dis = opt.v === 'grounding' && locked
+                              const dis = (opt.v === 'grounding' && locked)
+                                || (opt.v === 'description' && descLocked)
+                              const disWhy = opt.v === 'grounding'
+                                ? `${gStatus?.reason}\n${gStatus?.install_hint}`
+                                : `${vlmCfg?.reason}\n${vlmCfg?.hint}`
                               return (
                                 <button
                                   key={opt.v}
                                   type="button"
                                   disabled={dis}
                                   onClick={() => applyAnchorPatch(i, { vlm_mode: opt.v })}
-                                  title={dis ? `無法使用：${gStatus?.reason}\n${gStatus?.install_hint}` : opt.hint}
+                                  title={dis ? `無法使用：${disWhy}` : opt.hint}
                                   className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
                                     dis
                                       ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
@@ -661,6 +692,39 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                               <br />
                               {gStatus?.install_hint}
                             </p>
+                          )}
+                          {descLocked && (
+                            <p className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 rounded px-1.5 py-1 leading-snug">
+                              🔒「描述→OCR」無法使用：{vlmCfg?.reason}
+                              <br />
+                              {vlmCfg?.hint} 到<Link href="/settings" className="text-indigo-600 underline">設定頁</Link>設定。
+                            </p>
+                          )}
+                          {vlmMode === 'description' && (
+                            <>
+                              <textarea
+                                value={a.vlm_prompt || ''}
+                                onChange={e => applyAnchorPatch(i, { vlm_prompt: e.target.value })}
+                                placeholder="描述要點的東西，強調它「旁邊有什麼固定不變的字」（例：「訂單編號:」後面那組編號 / 表格第一列的客戶名稱）"
+                                rows={2}
+                                className="w-full text-[11px] px-1.5 py-1 rounded border border-indigo-300 bg-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-400/20 font-mono resize-y"
+                              />
+                              <p className="text-[10px] text-gray-500 leading-snug">
+                                流程：模型看圖 → 回「目標實際顯示的文字」→ 用那段文字跑 OCR 定位 → 點中心。
+                                座標由 OCR 決定，模型不碰，所以不會點到隔壁那顆。
+                                <br />
+                                <span className="text-emerald-700">
+                                  適合：文字每次都不同（訂單編號、當日日期、登入者名稱），錄製時填不了「要找的文字」。
+                                </span>
+                                <br />
+                                <span className="text-amber-600">
+                                  文字每次都一樣就別用這個 —— 直接勾下面的 OCR 填死那串字，又快又不用模型。
+                                </span>
+                                <br />
+                                描述要指向<strong>畫面上固定不變的相鄰文字</strong>；只說「那個編號」模型會不知道是哪個。
+                                每次回放多一次推論（地端約 15-20 秒）。
+                              </p>
+                            </>
                           )}
                           {vlmMode === 'grounding' && (
                             <>
@@ -711,9 +775,79 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                           )}
                           {vlmMode !== 'off' && (
                             <p className="text-[10px] text-amber-600 leading-relaxed">
-                              ⚠ 地端定位啟用中，下方 OCR / 圖像比對切換會被忽略（定位模型永遠優先）。
-                              每次回放多一次推論（約 2-7 秒）
+                              ⚠ 視覺輔助啟用中，下方 OCR / 圖像比對切換會被忽略（視覺模式永遠優先）。
+                              每次回放多一次推論（直接定位約 2-7 秒；描述→OCR 地端約 15-20 秒）
                             </p>
+                          )}
+                        </div>
+                      )
+                    })()}
+                    {/* 多形態錨點：同一顆按鈕會隨狀態換樣子（最大化↔還原、播放↔暫停、
+                        亮↔暗主題）。每張都比一次、取分數最高的那張定位。
+                        這是 Atlas 靠雲端模型 anchor_pick 解的問題，純 CV 更快更準也免金鑰。 */}
+                    {a.type === 'click_image' && a.image && (a.vlm_mode || 'off') === 'off' && (() => {
+                      const variants = (a.image_variants || []) as string[]
+                      const open = variantOpenIdx === i
+                      const pool = (assetFiles || []).filter(n => n !== a.image)
+                      return (
+                        <div className="mt-1 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => openVariantPicker(i)}
+                              title="同一顆按鈕會隨狀態換樣子時，把每種樣子各加一張。執行時每張都比一次、取最像的那張"
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                variants.length > 0
+                                  ? 'bg-purple-50 border-purple-300 text-purple-700'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-purple-300 hover:text-purple-600'
+                              }`}
+                            >🎭 多形態錨點{variants.length > 0 ? ` (${variants.length + 1})` : ''}</button>
+                            {variants.map(v => (
+                              <span key={v}
+                                className="text-[10px] px-1 py-0.5 rounded bg-purple-100 text-purple-700 font-mono inline-flex items-center gap-1">
+                                {v}
+                                <button type="button" onClick={() => toggleVariant(i, v)}
+                                  className="text-purple-400 hover:text-purple-700">×</button>
+                              </span>
+                            ))}
+                          </div>
+                          {open && (
+                            <div className="border border-purple-200 rounded p-1.5 bg-purple-50/40 space-y-1">
+                              <p className="text-[10px] text-gray-600 leading-snug">
+                                勾選這顆按鈕的<strong>其他樣子</strong>。回放時每張都比一次、
+                                取分數最高的那張定位 —— 不是「第一張過門檻就用」，
+                                因為兩張都可能勉強過門檻，只有分數差得出來哪張是當下真正的樣子。
+                              </p>
+                              {assetFiles === null ? (
+                                <p className="text-[10px] text-gray-400">載入中…</p>
+                              ) : pool.length === 0 ? (
+                                <p className="text-[10px] text-gray-400">
+                                  這個資料夾沒有其他錨點圖。先把按鈕的另一種樣子錄下來
+                                  （或用錨點編輯器手動圈一張）再回來勾。
+                                </p>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {pool.map(n => {
+                                    const on = variants.includes(n)
+                                    return (
+                                      <button key={n} type="button" onClick={() => toggleVariant(i, n)}
+                                        className={`flex flex-col items-center gap-0.5 p-1 rounded border transition-colors ${
+                                          on ? 'border-purple-400 bg-white' : 'border-gray-200 bg-white hover:border-purple-300'
+                                        }`}
+                                      >
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={assetImageUrl(data.assetsDir || defaultAssetsDir, n)}
+                                          alt={n} className="max-h-8 max-w-[90px] object-contain" />
+                                        <span className={`text-[9px] font-mono max-w-[90px] truncate ${
+                                          on ? 'text-purple-700' : 'text-gray-400'}`}>
+                                          {on ? '☑ ' : '☐ '}{n}
+                                        </span>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                       )

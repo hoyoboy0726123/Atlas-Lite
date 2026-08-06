@@ -175,11 +175,24 @@ class ComputerUseAction(BaseModel):
     #                 Excel ribbon / 檔案總管都涵蓋）。失敗自動退回 CV → 座標。
     #                 注意：同一顆模型「讀畫面文字」會編造，所以只拿它定位、不讀字。
     #                 需要 plugins/vlm_grounding 外掛 + NVIDIA GPU。
-    # Atlas 另有 "description" / "anchor_pick" 兩種雲端 VLM 模式，Atlas-Lite
-    # 不支援（執行到會明確報錯，不會靜默走到別的路徑去點錯東西）。
+    #   "description" → 視覺模型看圖回「目標實際顯示的文字」→ 交給 OCR 定位。
+    #                 給「文字是動態的、錄製時不知道會是什麼字」的場景用
+    #                 （訂單編號、當日日期、使用者名稱）。模型不碰座標，
+    #                 所以不會出現「指到隔壁那顆」的問題。
+    #                 需要在設定頁指定視覺模型（Ollama 地端 or 雲端 API key），
+    #                 沒設定時前端反灰、執行到會明確報錯。
+    # Atlas 另有 "anchor_pick"（雲端模型從多張候選錨點裡挑一張），Atlas-Lite 改用
+    # 下面的 image_variants 純 CV 取代 —— 實測「最大化↔還原」兩態互測
+    # 1.000 vs 0.707、0px 命中，比丟給模型判斷又快又準，而且免金鑰。
     vlm_mode: str = "off"
-    vlm_prompt: str = ""         # grounding 模式：要定位的目標描述
+    vlm_prompt: str = ""         # grounding / description 模式：目標描述
     vlm_anchors: list[str] = []  # [僅相容用] anchor_pick 的候選錨點清單
+
+    # ── 多形態錨點（純 CV，取代 anchor_pick）───────────────────────
+    # 同一顆按鈕會隨狀態換樣子時（最大化↔還原、播放↔暫停、亮↔暗主題），
+    # 錄製時把每種樣子各存一張，執行時每張都比一次、取分數最高的那張定位。
+    # 空 = 只用主錨點 image。檔名相對 assets_dir，跟 image 同一個資料夾。
+    image_variants: list[str] = []
 
 
 class PipelineStep(BaseModel):

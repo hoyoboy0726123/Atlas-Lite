@@ -1,7 +1,8 @@
 """環境設定。
 
-Atlas-Lite 不需要任何 LLM API 金鑰 —— 這裡只剩 Telegram（選用）、時區、
-以及資料目錄的位置。`check_config()` 因此永遠回空清單，不會擋啟動。
+核心功能不需要任何 API 金鑰。這裡只有 Telegram（選用）、時區、資料目錄，
+以及視覺模型（選用，且可以完全跑地端）。`check_config()` 因此永遠回空清單，
+不會擋啟動。
 """
 import os
 from pathlib import Path
@@ -18,6 +19,15 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Taipei")
+
+# 視覺模型（選用，給 vlm_mode='description' 用）。
+# 設定頁存的值優先；這裡是給無頭機器 / 不想開網頁的人用的後援。
+# provider 填 ollama 就是地端，不需要金鑰、截圖不出本機。
+# 三個都沒設 → 前端把「描述→OCR」反灰，其他功能完全不受影響。
+VLM_PROVIDER = os.getenv("ATLASLITE_VLM_PROVIDER", "").strip().lower()
+VLM_MODEL = os.getenv("ATLASLITE_VLM_MODEL", "").strip()
+VLM_API_KEY = os.getenv("ATLASLITE_VLM_API_KEY", "").strip()
+VLM_BASE_URL = os.getenv("ATLASLITE_VLM_BASE_URL", "").strip()
 
 # 資料目錄。Atlas 用 repo_root/ai_output/ 同時放 DB、log、工作流產物；
 # Atlas-Lite 統一收在 data/ 底下分子目錄（見下方 mkdir）。

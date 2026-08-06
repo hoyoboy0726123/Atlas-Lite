@@ -33,6 +33,12 @@ cryptography
 apscheduler==3.10.4
 python-telegram-bot==21.6
 
+# ── 視覺模型客戶端（選用功能 vlm_mode='description' 用）──────
+# 只需要「送一張圖 + 一段文字」，所以走各家的 OpenAI 相容端點，
+# 不拉 LangChain（那一整包是依賴從 1.4GB 降到 250MB 的主因）。
+# 沒設定視覺模型的話這個套件也用不到，但它只有幾 MB。
+httpx
+
 # ── 執行器 ──────────────────────────────────────────────────
 # Windows 上 create_subprocess_shell 會包一層 cmd.exe，只殺父行程會留下孤兒，
 # 所以 kill 要走完整 process tree。

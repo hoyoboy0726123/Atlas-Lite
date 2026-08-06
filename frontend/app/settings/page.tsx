@@ -14,10 +14,10 @@ import { toast, Toaster } from 'sonner'
 
 import {
   deleteSecret, getComputerUseSettings, getEnvPaths, getGroundingStatus,
-  getNotificationSettings, listSecrets, saveComputerUseSettings,
-  saveNotificationSettings, setSecret,
+  getNotificationSettings, getVlmSettings, listSecrets, probeVlm,
+  saveComputerUseSettings, saveNotificationSettings, saveVlmSettings, setSecret,
   type ComputerUseSettings, type EnvPaths, type GroundingStatus,
-  type NotificationSettings, type SecretMeta,
+  type NotificationSettings, type SecretMeta, type VlmSettings,
 } from '@/lib/api'
 
 const cardCls = 'bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden'
@@ -54,6 +54,7 @@ export default function SettingsPage() {
         <PathsSection />
         <NotificationSection />
         <ComputerUseSection />
+        <VlmSection />
         <SecretsSection />
       </div>
     </div>
@@ -259,6 +260,180 @@ function ComputerUseSection() {
           </>
         )}
       </div>
+    </Section>
+  )
+}
+
+// ── 視覺模型（選用）─────────────────────────────────────────────────
+// 只服務桌面自動化的「描述→OCR」模式。沒設定的話所有其他功能照常運作，
+// 面板上那個選項會反灰 —— 這是刻意的：藏起來使用者永遠不知道有這功能。
+
+const VLM_PROVIDER_LABEL: Record<string, string> = {
+  ollama: 'Ollama（地端，免金鑰）',
+  openai: 'OpenAI',
+  groq: 'Groq',
+  gemini: 'Google Gemini',
+  anthropic: 'Anthropic',
+}
+const VLM_MODEL_PLACEHOLDER: Record<string, string> = {
+  ollama: 'qwen2.5vl:7b',
+  openai: 'gpt-4o-mini',
+  groq: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  gemini: 'gemini-2.5-flash',
+  anthropic: 'claude-sonnet-5',
+}
+
+function VlmSection() {
+  const [v, setV] = useState<VlmSettings | null>(null)
+  const [model, setModel] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [probing, setProbing] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getVlmSettings().then(x => {
+      setV(x); setModel(x.vlm_model); setBaseUrl(x.vlm_base_url)
+    }).catch(() => {})
+  }, [])
+  useEffect(load, [load])
+
+  const provider = v?.vlm_provider || ''
+  const needsKey = provider !== '' && provider !== 'ollama'
+
+  const save = async (patch: Parameters<typeof saveVlmSettings>[0]) => {
+    setBusy(true)
+    try {
+      const next = await saveVlmSettings(patch)
+      setV(next); setModel(next.vlm_model); setBaseUrl(next.vlm_base_url)
+      if ('vlm_api_key' in patch) setApiKey('')
+      toast.success('已儲存')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '儲存失敗')
+    } finally { setBusy(false) }
+  }
+
+  const runProbe = async () => {
+    setProbing(true)
+    try {
+      const r = await probeVlm()
+      if (r.ok) toast.success(`可以看圖（模型回「${r.answer}」）`)
+      else toast.error(r.reason || '測試失敗', { description: r.hint || undefined, duration: 12000 })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '測試失敗')
+    } finally { setProbing(false) }
+  }
+
+  return (
+    <Section
+      title="視覺模型（選用）"
+      desc="只給桌面自動化的「描述→OCR」用：畫面上的文字是動態的、錄製時不知道會是什麼字（訂單編號、當日日期）時，讓模型看圖告訴系統目標的實際文字，再交給 OCR 定位。模型不負責座標，所以不會點到隔壁那顆。不設定的話那個選項會反灰，其他功能完全不受影響。"
+    >
+      <div>
+        <label className="text-sm text-gray-700 block mb-1.5">供應商</label>
+        <div className="flex flex-wrap gap-1.5">
+          {['', 'ollama', 'openai', 'groq', 'gemini', 'anthropic'].map(p => (
+            <button key={p || 'none'} type="button" disabled={busy}
+              onClick={() => save({ vlm_provider: p })}
+              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                provider === p
+                  ? 'bg-indigo-500 text-white border-indigo-500'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+              }`}
+            >{p === '' ? '不使用' : VLM_PROVIDER_LABEL[p]}</button>
+          ))}
+        </div>
+        {provider === 'ollama' && (
+          <p className="text-xs text-emerald-700 mt-1.5 leading-relaxed">
+            地端推論：不需要 API 金鑰，<strong>截圖不會離開這台機器</strong>。
+            需要先 <code className="bg-gray-100 px-1 rounded">ollama pull qwen2.5vl:7b</code>
+            （一般文字模型看不懂圖，一定要選多模態的）。
+          </p>
+        )}
+        {needsKey && (
+          <p className="text-xs text-amber-600 mt-1.5 leading-relaxed">
+            ⚠ 雲端模式會<strong>把螢幕截圖上傳到 {VLM_PROVIDER_LABEL[provider]}</strong> 並依用量計費。
+            介意的話改用 Ollama。
+          </p>
+        )}
+      </div>
+
+      {provider !== '' && (
+        <>
+          <div>
+            <label className="text-sm text-gray-700 block mb-1.5">模型名稱</label>
+            <div className="flex gap-2">
+              <input className={inputCls} value={model} onChange={e => setModel(e.target.value)}
+                placeholder={VLM_MODEL_PLACEHOLDER[provider] || ''} />
+              <button type="button" disabled={busy || model === v?.vlm_model}
+                onClick={() => save({ vlm_model: model.trim() })}
+                className="shrink-0 px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm hover:bg-indigo-600 disabled:opacity-40">
+                儲存
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1.5">必須是<strong>看得懂圖片</strong>的多模態模型。</p>
+          </div>
+
+          {needsKey && (
+            <div>
+              <label className="text-sm text-gray-700 block mb-1.5">
+                API 金鑰
+                {v?.vlm_api_key_set && (
+                  <span className="ml-2 text-xs text-emerald-600">已設定 {v.vlm_api_key_masked}</span>
+                )}
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input className={inputCls} type={showKey ? 'text' : 'password'} value={apiKey}
+                    onChange={e => setApiKey(e.target.value)}
+                    placeholder={v?.vlm_api_key_set ? '（留空 = 不變更）' : 'sk-…'} />
+                  <button type="button" onClick={() => setShowKey(k => !k)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button type="button" disabled={busy || !apiKey.trim()}
+                  onClick={() => save({ vlm_api_key: apiKey.trim() })}
+                  className="shrink-0 px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm hover:bg-indigo-600 disabled:opacity-40">
+                  儲存
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1.5">存在本機設定檔，永遠不會回傳給前端顯示完整內容。</p>
+            </div>
+          )}
+
+          <div>
+            <label className="text-sm text-gray-700 block mb-1.5">
+              自訂端點 <span className="text-xs text-gray-400">（選填，自架或走代理才需要）</span>
+            </label>
+            <div className="flex gap-2">
+              <input className={inputCls} value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
+                placeholder={provider === 'ollama' ? 'http://localhost:11434/v1' : '留空使用官方端點'} />
+              <button type="button" disabled={busy || baseUrl === v?.vlm_base_url}
+                onClick={() => save({ vlm_base_url: baseUrl.trim() })}
+                className="shrink-0 px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm hover:bg-indigo-600 disabled:opacity-40">
+                儲存
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" disabled={probing || !v?.available} onClick={runProbe}
+              className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-40 flex items-center gap-1.5">
+              {probing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              測試連線
+            </button>
+            {/* 光是「設定填滿了」不代表能用 —— 純文字模型會安靜地忽略圖片，
+                那比連不上更糟，所以測試是真的送一張圖去問顏色 */}
+            <span className="text-xs text-gray-500">
+              {v?.available
+                ? '送一張小圖問顏色，確認模型真的讀得到圖片。'
+                : `尚不可用：${v?.reason || '設定未完成'}`}
+            </span>
+          </div>
+        </>
+      )}
     </Section>
   )
 }

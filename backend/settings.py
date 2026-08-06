@@ -28,6 +28,16 @@ _DEFAULT = {
     # 預設 OFF —— 由使用者決定要不要打擾桌面。並發執行用 ref-count 處理。
     "auto_minimize_for_computer_use": False,
 
+    # ── 視覺模型（選用，給 vlm_mode='description' 用）──
+    # 「畫面上的文字是動態的、錄製時不知道要找什麼」時，讓模型看圖告訴你
+    # 目標的實際文字，再交給 OCR 定位。
+    # 沒設 → 前端把那個選項反灰，其他功能完全不受影響。
+    # provider 填 ollama 就是**地端**，不需要金鑰、圖片不出本機。
+    "vlm_provider": "",      # ollama | openai | groq | gemini | anthropic
+    "vlm_model": "",         # 例：qwen2.5vl:7b（Ollama）、gpt-4o-mini（OpenAI）
+    "vlm_api_key": "",       # Ollama 不需要
+    "vlm_base_url": "",      # 留空用內建預設；自架 / 代理才填
+
     # ── 地端 GUI 定位模型（plugins/vlm_grounding 外掛）──
     # 精度：auto（依可用顯卡記憶體自動選）/ fp16（需 ~11GB）/ int4（需 ~4.5GB）
     "grounding_precision": "auto",
@@ -74,6 +84,12 @@ def update_settings(**patch) -> dict:
         if v not in ("auto", "fp16", "int4"):
             raise ValueError(f"grounding_precision 只能是 auto / fp16 / int4，收到 {v!r}")
         patch["grounding_precision"] = v
+
+    if "vlm_provider" in patch:
+        v = (patch["vlm_provider"] or "").strip().lower()
+        if v and v not in ("ollama", "openai", "groq", "gemini", "anthropic"):
+            raise ValueError(f"不支援的視覺模型供應商：{v}")
+        patch["vlm_provider"] = v
 
     for key in ("telegram_remote_control", "auto_minimize_for_computer_use",
                 "grounding_show_when_missing"):

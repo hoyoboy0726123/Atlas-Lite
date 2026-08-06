@@ -102,6 +102,64 @@ async def put_computer_use_settings(req: ComputerUseSettingsRequest):
     return await get_computer_use_settings()
 
 
+# ── 視覺模型（vlm_mode='description' 用，選用）────────────────────────
+
+class VlmSettingsRequest(BaseModel):
+    vlm_provider: Optional[str] = None
+    vlm_model: Optional[str] = None
+    vlm_api_key: Optional[str] = None
+    vlm_base_url: Optional[str] = None
+
+
+def _vlm_payload() -> dict:
+    from engine import vlm_cloud
+    s = get_settings()
+    key = s.get("vlm_api_key", "") or ""
+    cap = vlm_cloud.capability()
+    return {
+        "vlm_provider": s.get("vlm_provider", ""),
+        "vlm_model": s.get("vlm_model", ""),
+        "vlm_base_url": s.get("vlm_base_url", ""),
+        # 跟 Telegram token 一樣：只回「有沒有設」與遮罩，不回完整金鑰
+        "vlm_api_key_set": bool(key),
+        "vlm_api_key_masked": (key[:6] + "…" + key[-4:]) if len(key) > 12 else "",
+        "available": cap["available"],
+        "reason": cap["reason"],
+        "hint": cap["hint"],
+        "local": cap.get("local", False),
+        "providers": ["ollama", "openai", "groq", "gemini", "anthropic"],
+    }
+
+
+@router.get("/settings/vlm")
+async def get_vlm_settings():
+    return _vlm_payload()
+
+
+@router.put("/settings/vlm")
+async def put_vlm_settings(req: VlmSettingsRequest):
+    patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    if patch:
+        try:
+            update_settings(**patch)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return _vlm_payload()
+
+
+@router.post("/settings/vlm/probe")
+async def probe_vlm():
+    """真的打一次（左紅右藍小圖問「右半邊什麼顏色」）。
+
+    分得出「設定沒填」「金鑰壞了」「模型看不懂圖」三種 —— 最後一種最陰險，
+    設定看起來完好但模型其實沒讀到圖，等於每次都在瞎猜。
+    """
+    import asyncio
+
+    from engine import vlm_cloud
+    return await asyncio.get_running_loop().run_in_executor(None, vlm_cloud.probe)
+
+
 # ── Secrets Vault ────────────────────────────────────────────────────
 # 值永遠不會被回傳，也永遠不會進 log。工作流用 {{ secrets.名稱 }} 引用。
 

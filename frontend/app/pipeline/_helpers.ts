@@ -146,9 +146,14 @@ export interface ComputerUseAction {
   // 這張錨點在錄製當下的畫面上還對得到幾個地方。>0 代表回放時 CV 可能挑錯。
   anchor_rivals?: number
   anchor_nearest_rival_px?: number
-  // 地端 GUI 定位模型：直接給座標（連 CV 都點不準時用；失敗自動退回 CV）
-  vlm_mode?: 'off' | 'grounding'
-  vlm_prompt?: string   // grounding 模式要定位的目標描述
+  // 視覺輔助模式：
+  //   grounding   → 地端 GUI 定位模型直接給座標（連 CV 都點不準時用；失敗自動退回 CV）
+  //   description → 模型讀出目標的實際文字，座標交給 OCR（文字每次都不同時用）
+  vlm_mode?: 'off' | 'grounding' | 'description'
+  vlm_prompt?: string   // grounding / description 模式要找的目標描述
+  // 多形態錨點：同一顆按鈕的不同樣子（最大化↔還原、亮↔暗主題），
+  // 執行時每張都比一次取最高分。取代 Atlas 靠雲端模型挑圖的 anchor_pick。
+  image_variants?: string[]
   // 控制流：if_image_found / retry_until 用（unknown[] 因為遞迴 dict 巢狀）
   then?: ComputerUseAction[]
   else?: ComputerUseAction[]

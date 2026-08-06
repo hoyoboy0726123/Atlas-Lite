@@ -340,6 +340,50 @@ export async function verifyGroundingDesc(
   return res.json()
 }
 
+// ── 視覺模型（vlm_mode='description' 用，選用）─────────────────────
+
+export interface VlmSettings {
+  vlm_provider: string
+  vlm_model: string
+  vlm_base_url: string
+  vlm_api_key_set: boolean
+  vlm_api_key_masked: string
+  /** false = 設定不完整 → 前端把「描述→OCR」反灰 */
+  available: boolean
+  reason: string
+  hint: string
+  /** true = Ollama 地端，圖片不出本機 */
+  local: boolean
+  providers: string[]
+}
+
+export async function getVlmSettings(): Promise<VlmSettings> {
+  const res = await fetchWithRetry(`${BASE}/settings/vlm`)
+  if (!res.ok) throw new Error('讀取視覺模型設定失敗')
+  return res.json()
+}
+
+export async function saveVlmSettings(s: Partial<{
+  vlm_provider: string; vlm_model: string; vlm_api_key: string; vlm_base_url: string
+}>): Promise<VlmSettings> {
+  const res = await fetch(`${BASE}/settings/vlm`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(s),
+  })
+  if (!res.ok) throw new Error(await _readErrorDetail(res))
+  return res.json()
+}
+
+/** 真的打一次（左紅右藍小圖），確認金鑰 / 模型 / 看圖能力都沒問題。 */
+export async function probeVlm(): Promise<{
+  ok: boolean; answer?: string; reason: string; hint: string
+}> {
+  const res = await fetch(`${BASE}/settings/vlm/probe`, { method: 'POST' })
+  if (!res.ok) throw new Error(await _readErrorDetail(res))
+  return res.json()
+}
+
 /** 桌面自動化相關的使用者設定（自動縮小視窗、地端定位精度）。 */
 export interface ComputerUseSettings {
   auto_minimize_for_computer_use: boolean
