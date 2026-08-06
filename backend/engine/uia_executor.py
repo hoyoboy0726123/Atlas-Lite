@@ -516,13 +516,33 @@ def execute_uia_action(action: dict, step_window: str,
                     target = parent
                 except Exception:
                     break
+            _name = f"{target.Name!r:.60}"
             try:
                 wp = target.GetWindowPattern()
                 if wp:
                     wp.Close()
-                    return UiaActionResult(True, f"已關閉視窗 {target.Name!r:.60} via WindowPattern")
+                    return UiaActionResult(True, f"已關閉視窗 {_name} via WindowPattern")
             except Exception as e:
-                return UiaActionResult(False, f"WindowPattern.Close() 失敗:{e}")
+                # ⚠ Close() 丟例外不等於沒關掉。2026-08-06 實測 Win11 記事本：
+                # 視窗確實關了，但 COM 回 -2147220991「事件無法啟動任何訂閱者」
+                # —— 那是**關閉之後**送不出通知事件的錯，不是關閉失敗。
+                # 直接回 False 會讓 fail_fast 的工作流在明明成功時中止。
+                # → 例外後回頭確認視窗還在不在，用事實判定。
+                _gone = False
+                try:
+                    for _ in range(6):          # 最多等 1.5s，關閉是非同步的
+                        time.sleep(0.25)
+                        if not target.Exists(0, 0):
+                            _gone = True
+                            break
+                except Exception:
+                    # 連 Exists 都問不到，多半是元素已經消失
+                    _gone = True
+                if _gone:
+                    return UiaActionResult(
+                        True, f"已關閉視窗 {_name}（Close() 回了 {type(e).__name__}，"
+                              f"但確認視窗已消失 —— 那是關閉後的通知事件錯誤）")
+                return UiaActionResult(False, f"WindowPattern.Close() 失敗且視窗還在:{e}")
             return UiaActionResult(False, "目標控制項或父鏈沒 WindowPattern、不能關")
 
         elif atype == "uia_assert_state":
