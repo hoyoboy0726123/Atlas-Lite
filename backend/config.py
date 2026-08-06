@@ -26,8 +26,25 @@ TIMEZONE = os.getenv("TIMEZONE", "Asia/Taipei")
 # 三個都沒設 → 前端把「描述→OCR」反灰，其他功能完全不受影響。
 VLM_PROVIDER = os.getenv("ATLASLITE_VLM_PROVIDER", "").strip().lower()
 VLM_MODEL = os.getenv("ATLASLITE_VLM_MODEL", "").strip()
-VLM_API_KEY = os.getenv("ATLASLITE_VLM_API_KEY", "").strip()
 VLM_BASE_URL = os.getenv("ATLASLITE_VLM_BASE_URL", "").strip()
+
+# 金鑰「每家一個」而不是共用一把 —— 使用者可以把幾家的金鑰都放 .env，
+# 之後在設定頁切供應商就好，不用每切一次回去改 .env。
+# 用各家官方慣用的變數名，這樣跟其他工具共用同一份 .env 也不會打架。
+VLM_API_KEYS = {
+    "openai": os.getenv("OPENAI_API_KEY", "").strip(),
+    "groq": os.getenv("GROQ_API_KEY", "").strip(),
+    "gemini": (os.getenv("GEMINI_API_KEY", "").strip()
+               or os.getenv("GOOGLE_API_KEY", "").strip()),
+    "anthropic": os.getenv("ANTHROPIC_API_KEY", "").strip(),
+}
+# 共用後援：只用一家、懶得記變數名的人可以填這個。
+VLM_API_KEY = os.getenv("ATLASLITE_VLM_API_KEY", "").strip()
+
+
+def vlm_env_key(provider: str) -> str:
+    """該供應商從 .env 讀得到的金鑰（沒有就回空字串）。"""
+    return VLM_API_KEYS.get(provider, "") or VLM_API_KEY
 
 # 資料目錄。Atlas 用 repo_root/ai_output/ 同時放 DB、log、工作流產物；
 # Atlas-Lite 統一收在 data/ 底下分子目錄（見下方 mkdir）。

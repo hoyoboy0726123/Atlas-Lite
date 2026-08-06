@@ -104,6 +104,9 @@ async def put_computer_use_settings(req: ComputerUseSettingsRequest):
 
 # ── 視覺模型（vlm_mode='description' 用，選用）────────────────────────
 
+_VLM_PROVIDERS = ["ollama", "openai", "groq", "gemini", "anthropic"]
+
+
 class VlmSettingsRequest(BaseModel):
     vlm_provider: Optional[str] = None
     vlm_model: Optional[str] = None
@@ -112,22 +115,29 @@ class VlmSettingsRequest(BaseModel):
 
 
 def _vlm_payload() -> dict:
+    import config
     from engine import vlm_cloud
     s = get_settings()
     key = s.get("vlm_api_key", "") or ""
     cap = vlm_cloud.capability()
+    provider = s.get("vlm_provider", "") or config.VLM_PROVIDER
     return {
-        "vlm_provider": s.get("vlm_provider", ""),
-        "vlm_model": s.get("vlm_model", ""),
-        "vlm_base_url": s.get("vlm_base_url", ""),
+        "vlm_provider": provider,
+        "vlm_model": s.get("vlm_model", "") or config.VLM_MODEL,
+        "vlm_base_url": s.get("vlm_base_url", "") or config.VLM_BASE_URL,
         # 跟 Telegram token 一樣：只回「有沒有設」與遮罩，不回完整金鑰
         "vlm_api_key_set": bool(key),
         "vlm_api_key_masked": (key[:6] + "…" + key[-4:]) if len(key) > 12 else "",
+        # 目前這家的金鑰哪來的：'settings' / 'env' / ''（沒有）。
+        # 從 .env 讀到就別再叫使用者填一次 —— 那是最容易讓人以為壞掉的地方。
+        "key_source": cap.get("key_source", ""),
+        # 哪幾家在 .env 裡已經有金鑰了，讓設定頁能標出來（不回金鑰本身）
+        "env_keys": sorted(p for p in _VLM_PROVIDERS if config.vlm_env_key(p)),
         "available": cap["available"],
         "reason": cap["reason"],
         "hint": cap["hint"],
         "local": cap.get("local", False),
-        "providers": ["ollama", "openai", "groq", "gemini", "anthropic"],
+        "providers": _VLM_PROVIDERS,
     }
 
 

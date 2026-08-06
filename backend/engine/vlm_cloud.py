@@ -46,14 +46,24 @@ def _cfg() -> dict:
     """設定頁優先，沒填就退 .env。
 
     跟 Telegram 憑證同一套規則 —— 無頭機器 / 不想開網頁的人可以只靠 .env。
+
+    金鑰是**跟著供應商走**的：.env 裡可以同時放 OPENAI_API_KEY 與
+    GEMINI_API_KEY，設定頁切供應商時自動取對應那把，不會拿到上一家的金鑰。
     """
-    from config import VLM_API_KEY, VLM_BASE_URL, VLM_MODEL, VLM_PROVIDER
+    from config import VLM_BASE_URL, VLM_MODEL, VLM_PROVIDER, vlm_env_key
     from settings import get_settings
     s = get_settings()
+    provider = (s.get("vlm_provider") or "").strip().lower() or VLM_PROVIDER
+    key = (s.get("vlm_api_key") or "").strip()
+    key_src = "settings" if key else ""
+    if not key and provider in _NEEDS_KEY:
+        key = vlm_env_key(provider)
+        key_src = "env" if key else ""
     return {
-        "provider": (s.get("vlm_provider") or "").strip().lower() or VLM_PROVIDER,
+        "provider": provider,
         "model": (s.get("vlm_model") or "").strip() or VLM_MODEL,
-        "api_key": (s.get("vlm_api_key") or "").strip() or VLM_API_KEY,
+        "api_key": key,
+        "key_source": key_src,
         "base_url": (s.get("vlm_base_url") or "").strip() or VLM_BASE_URL,
     }
 
@@ -65,24 +75,30 @@ def capability(force: bool = False) -> dict:
     真的連不連得上由 probe() 負責（使用者按「測試連線」才跑）。
     """
     c = _cfg()
+
+    def _r(available: bool, reason: str = "", hint: str = "") -> dict:
+        # key_source 每個分支都要帶 —— 「選了供應商但還沒填模型」時前端仍然
+        # 要能顯示「金鑰已從 .env 讀到」，否則使用者會以為金鑰沒吃到又填一次。
+        return {"available": available, "provider": c["provider"], "model": c["model"],
+                "local": c["provider"] == "ollama", "key_source": c["key_source"],
+                "reason": reason, "hint": hint}
+
     if not c["provider"]:
-        return {"available": False, "provider": "", "model": "",
-                "reason": "尚未設定視覺模型",
-                "hint": "到設定頁選一個供應商。裝了 Ollama 的話選它就好，不需要金鑰、圖片不出本機。"}
+        return _r(False, "尚未設定視覺模型",
+                  "到設定頁選一個供應商。裝了 Ollama 的話選它就好，不需要金鑰、圖片不出本機。")
     if c["provider"] not in _DEFAULT_BASE:
-        return {"available": False, "provider": c["provider"], "model": c["model"],
-                "reason": f"不認得的供應商：{c['provider']}",
-                "hint": f"支援：{'、'.join(_DEFAULT_BASE)}"}
+        return _r(False, f"不認得的供應商：{c['provider']}",
+                  f"支援：{'、'.join(_DEFAULT_BASE)}")
     if not c["model"]:
-        return {"available": False, "provider": c["provider"], "model": "",
-                "reason": "沒填模型名稱",
-                "hint": "例如 Ollama 的 qwen2.5vl:7b、OpenAI 的 gpt-4o-mini"}
+        return _r(False, "沒填模型名稱",
+                  "例如 Ollama 的 qwen2.5vl:7b、OpenAI 的 gpt-4o-mini")
     if c["provider"] in _NEEDS_KEY and not c["api_key"]:
-        return {"available": False, "provider": c["provider"], "model": c["model"],
-                "reason": f"{c['provider']} 需要 API 金鑰但沒填",
-                "hint": "在設定頁填入，或改用 Ollama（地端、免金鑰）"}
-    return {"available": True, "provider": c["provider"], "model": c["model"],
-            "local": c["provider"] == "ollama", "reason": "", "hint": ""}
+        _envname = {"openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY",
+                    "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+        return _r(False, f"{c['provider']} 需要 API 金鑰但沒填",
+                  f"在設定頁填入、或在 .env 設 {_envname[c['provider']]}，"
+                  f"或改用 Ollama（地端、免金鑰）")
+    return _r(True)
 
 
 def _encode(img_bgr) -> Optional[str]:

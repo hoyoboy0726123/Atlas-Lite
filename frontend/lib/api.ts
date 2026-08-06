@@ -348,6 +348,10 @@ export interface VlmSettings {
   vlm_base_url: string
   vlm_api_key_set: boolean
   vlm_api_key_masked: string
+  /** 目前這家的金鑰哪來的：'settings'（設定頁填的）/ 'env'（.env 讀到的）/ ''（沒有） */
+  key_source: 'settings' | 'env' | ''
+  /** 哪幾家在 .env 裡已經有金鑰，設定頁用來標記（不含金鑰本身） */
+  env_keys: string[]
   /** false = 設定不完整 → 前端把「描述→OCR」反灰 */
   available: boolean
   reason: string

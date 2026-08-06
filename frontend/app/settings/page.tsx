@@ -282,6 +282,12 @@ const VLM_MODEL_PLACEHOLDER: Record<string, string> = {
   gemini: 'gemini-2.5-flash',
   anthropic: 'claude-sonnet-5',
 }
+const VLM_ENV_NAME: Record<string, string> = {
+  openai: 'OPENAI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+}
 
 function VlmSection() {
   const [v, setV] = useState<VlmSettings | null>(null)
@@ -333,16 +339,22 @@ function VlmSection() {
       <div>
         <label className="text-sm text-gray-700 block mb-1.5">供應商</label>
         <div className="flex flex-wrap gap-1.5">
-          {['', 'ollama', 'openai', 'groq', 'gemini', 'anthropic'].map(p => (
-            <button key={p || 'none'} type="button" disabled={busy}
-              onClick={() => save({ vlm_provider: p })}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
-                provider === p
-                  ? 'bg-indigo-500 text-white border-indigo-500'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
-              }`}
-            >{p === '' ? '不使用' : VLM_PROVIDER_LABEL[p]}</button>
-          ))}
+          {['', 'ollama', 'openai', 'groq', 'gemini', 'anthropic'].map(p => {
+            // .env 已經有這家金鑰的話標一顆綠點 —— 使用者才知道選過去就能直接用，
+            // 不用再回設定頁填一次
+            const hasEnv = p !== '' && p !== 'ollama' && (v?.env_keys || []).includes(p)
+            return (
+              <button key={p || 'none'} type="button" disabled={busy}
+                onClick={() => save({ vlm_provider: p })}
+                title={hasEnv ? `.env 已有 ${VLM_ENV_NAME[p]}，選過去就能用` : undefined}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                  provider === p
+                    ? 'bg-indigo-500 text-white border-indigo-500'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+                }`}
+              >{p === '' ? '不使用' : VLM_PROVIDER_LABEL[p]}{hasEnv && ' ●'}</button>
+            )
+          })}
         </div>
         {provider === 'ollama' && (
           <p className="text-xs text-emerald-700 mt-1.5 leading-relaxed">
@@ -372,22 +384,36 @@ function VlmSection() {
                 儲存
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1.5">必須是<strong>看得懂圖片</strong>的多模態模型。</p>
+            <p className="text-xs text-gray-500 mt-1.5">
+              必須是<strong>看得懂圖片</strong>的多模態模型。
+              {provider === 'ollama' && (
+                <> 實測建議 <code className="bg-gray-100 px-1 rounded">qwen2.5vl:7b</code>
+                （讀對 19/20、每次約 15 秒）。<strong>不要用 qwen3-vl:8b-instruct</strong> ——
+                版本較新卻只有 4/8 且慢 3 倍。</>
+              )}
+            </p>
           </div>
 
           {needsKey && (
             <div>
               <label className="text-sm text-gray-700 block mb-1.5">
                 API 金鑰
-                {v?.vlm_api_key_set && (
+                {v?.key_source === 'settings' && (
                   <span className="ml-2 text-xs text-emerald-600">已設定 {v.vlm_api_key_masked}</span>
+                )}
+                {v?.key_source === 'env' && (
+                  <span className="ml-2 text-xs text-emerald-600">
+                    ✓ 已從 .env 的 {VLM_ENV_NAME[provider]} 讀到，不用再填
+                  </span>
                 )}
               </label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input className={inputCls} type={showKey ? 'text' : 'password'} value={apiKey}
                     onChange={e => setApiKey(e.target.value)}
-                    placeholder={v?.vlm_api_key_set ? '（留空 = 不變更）' : 'sk-…'} />
+                    placeholder={v?.key_source === 'env'
+                      ? '（留空 = 用 .env 那把；填了會蓋過去）'
+                      : v?.vlm_api_key_set ? '（留空 = 不變更）' : 'sk-…'} />
                   <button type="button" onClick={() => setShowKey(k => !k)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                     {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -398,8 +424,20 @@ function VlmSection() {
                   className="shrink-0 px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm hover:bg-indigo-600 disabled:opacity-40">
                   儲存
                 </button>
+                {v?.vlm_api_key_set && (
+                  <button type="button" disabled={busy}
+                    onClick={() => save({ vlm_api_key: '' })}
+                    title=".env 有設的話會退回用 .env 那把"
+                    className="shrink-0 px-3 py-2 rounded-lg border border-gray-200 text-gray-500 text-sm hover:bg-gray-50 disabled:opacity-40">
+                    清除
+                  </button>
+                )}
               </div>
-              <p className="text-xs text-gray-500 mt-1.5">存在本機設定檔，永遠不會回傳給前端顯示完整內容。</p>
+              <p className="text-xs text-gray-500 mt-1.5">
+                金鑰是<strong>每家一把</strong>：`.env` 可以同時放 OPENAI_API_KEY、GEMINI_API_KEY…，
+                切供應商時自動取對應那把。設定頁填的優先，清掉就退回 .env。
+                存在本機設定檔，永遠不會回傳給前端顯示完整內容。
+              </p>
             </div>
           )}
 
