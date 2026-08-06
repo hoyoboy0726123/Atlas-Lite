@@ -175,6 +175,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [anchorRisk, setAnchorRisk] = useState<Record<number, {
     rivals: number; nearest: number; scanned: number
     phases?: { box: number; near: number; fullscreen: number }
+    flat?: boolean; variance?: number
   }>>({})
 
   const runAnchorCheck = async (acts: ComputerUseAction[], dir: string) => {
@@ -187,17 +188,24 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
       })
       const map: typeof anchorRisk = {}
       for (const r of res.results) {
-        if (r.checked && r.rivals > 0) {
+        // flat（純色錨點）比有替身嚴重 —— CV 和幻覺守門對它都無效，一定要報
+        if (r.checked && (r.rivals > 0 || r.flat)) {
           map[r.index] = {
             rivals: r.rivals, nearest: r.nearest_rival_px,
             scanned: r.scanned ?? r.rivals, phases: r.phases,
+            flat: r.flat, variance: r.variance,
           }
         }
       }
       setAnchorRisk(map)
-      const n = Object.keys(map).length
-      if (n > 0) {
-        toast.warning(`${n} 個錨點在畫面上不只一處相似，回放時可能點錯（見動作列表的 ⚠）`,
+      const nFlat = Object.values(map).filter(m => m.flat).length
+      const nRival = Object.keys(map).length - nFlat
+      if (nFlat > 0) {
+        toast.error(`${nFlat} 個錨點幾乎沒有特徵（純色），CV 會亂命中 —— 請重圈（見動作列表的 ⚠）`,
+          { duration: 10000 })
+      }
+      if (nRival > 0) {
+        toast.warning(`${nRival} 個錨點在搜尋範圍內不只一處相似，回放時可能點錯（見動作列表的 ⚠）`,
           { duration: 7000 })
       }
     } catch (e) {
@@ -635,7 +643,16 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         替身在搜尋半徑「內」的話，勾「只搜附近」完全沒用（它本來就在附近），
                         該做的是縮半徑／拉橘框；只有替身是「退回全螢幕才會撞到」的，
                         勾「只搜附近」才是正解。 */}
-                    {anchorRisk[i] && (() => {
+                    {anchorRisk[i]?.flat && (
+                      <p className="text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-1 mt-1 leading-snug">
+                        ⛔ 這張錨點<strong>幾乎沒有特徵</strong>（灰階變異數 {anchorRisk[i].variance}）。
+                        它跟畫面上<strong>任何一塊平坦區域</strong>比對都會是滿分，所以
+                        CV 可能命中完全無關的位置，「直接定位」的幻覺守門也擋不住。
+                        <br />
+                        請按「編輯錨點」重圈一個<strong>含文字或邊框</strong>的範圍。
+                      </p>
+                    )}
+                    {anchorRisk[i] && !anchorRisk[i].flat && (() => {
                       const r = anchorRisk[i]
                       const nearRisk = (r.phases?.near || 0) > 0 || (r.phases?.box || 0) > 0
                       const onlyFullscreen = !nearRisk && (r.phases?.fullscreen || 0) > 0

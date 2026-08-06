@@ -313,6 +313,9 @@ export interface AnchorAnalysis {
   scanned?: number
   /** 各階段各有幾個搆得到，決定要給什麼建議 */
   phases?: { box: number; near: number; fullscreen: number }
+  /** 錨點幾乎沒有特徵（純色）→ CV 與幻覺守門都對它無效，比有替身更嚴重 */
+  flat?: boolean
+  variance?: number
   reason: string
 }
 

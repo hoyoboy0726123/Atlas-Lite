@@ -424,6 +424,23 @@ def _parse_search_region(action: dict) -> Optional[tuple[int, int, int, int]]:
 # 門檻用 0.5（跟 CV 預設一致）—— 分數在門檻以上的都是回放時可能被挑中的候選。
 ANCHOR_RIVAL_THRESHOLD = 0.5
 
+# 錨點「有沒有特徵」的下限（灰階變異數）。
+# 2026-08-06 實測：TM_CCOEFF_NORMED 對零變異的模板是數學上退化的（除以 0），
+# 純色錨點跟**任何東西**比都拿 1.000 —— 連純雜訊都 1.000。
+# 也就是說純色錨點會讓 CV 隨便命中一塊平坦區域、讓幻覺守門形同虛設。
+# 判別力實測：變異數 20 以下完全分不出來，100 以上正常（0.000~0.062）。
+# 實際錄製的錨點是 888~5295，門檻取 100 有將近 9 倍餘裕。
+ANCHOR_MIN_VARIANCE = 100.0
+
+
+def _anchor_variance(img) -> float:
+    """錨點的灰階變異數。太低 = 這張圖沒有特徵，比對結果不可信。"""
+    import cv2
+    if img is None:
+        return 0.0
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    return float(np.var(g))
+
 # 全桌面 fallback 的最低 CV 門檻（避免大螢幕假匹配點錯位置）。
 # 放模組層級是因為 analyze_anchor_uniqueness 也要用同一個值 —— 兩邊不一致
 # 就會出現「警告說有風險、執行時其實根本搆不到」的假警報。
@@ -476,7 +493,7 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
     def _skip(why: str) -> dict:
         return {"checked": False, "rivals": 0, "nearest_rival_px": 0,
                 "scanned": 0, "phases": {"box": 0, "near": 0, "fullscreen": 0},
-                "reason": why}
+                "flat": False, "variance": 0.0, "reason": why}
 
     img_name = (action.get("image") or "").strip()
     full_name = (action.get("full_image") or "").strip()
@@ -499,6 +516,20 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
         return _skip("點擊座標不在全螢幕截圖範圍內")
     if th >= H or tw >= W:
         return _skip("錨點圖比全螢幕截圖還大")
+
+    # 純色錨點是比「有替身」更嚴重的問題：它跟畫面上任何一塊平坦區域都是滿分，
+    # CV 會隨便命中、幻覺守門也失效。直接回報，不用再算替身（算了也沒意義）。
+    variance = _anchor_variance(tpl)
+    if variance < ANCHOR_MIN_VARIANCE:
+        return {
+            "checked": True, "rivals": 0, "nearest_rival_px": 0, "scanned": 0,
+            "phases": {"box": 0, "near": 0, "fullscreen": 0},
+            "flat": True, "variance": round(variance, 1),
+            "reason": (f"這張錨點幾乎沒有特徵（灰階變異數 {variance:.1f}）——"
+                       f"它跟畫面上任何一塊平坦區域都會是滿分，"
+                       f"CV 可能命中完全無關的位置，幻覺守門也擋不住。"
+                       f"請重圈一個含文字或邊框的範圍。"),
+        }
 
     g_full = cv2.cvtColor(full, cv2.COLOR_BGR2GRAY)
     g_tpl = cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY)
@@ -566,7 +597,8 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
                f"（不在搜尋範圍內、或分數低於該階段門檻）" if scanned
                else "錨點在錄製畫面上是獨一無二的")
         return {"checked": True, "rivals": 0, "nearest_rival_px": 0,
-                "scanned": scanned, "phases": counts, "reason": why}
+                "scanned": scanned, "phases": counts,
+                "flat": False, "variance": round(variance, 1), "reason": why}
 
     nearest = min(reachable)
     where = "、".join(
@@ -578,6 +610,8 @@ def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
         "nearest_rival_px": nearest,
         "scanned": scanned,
         "phases": counts,
+        "flat": False,
+        "variance": round(variance, 1),
         "reason": (f"執行時搆得到的相似處有 {len(reachable)} 個（{where}），"
                    f"最近的在 {nearest}px 外"
                    + (f"；另有 {scanned - len(reachable)} 個搆不到，不列入"
@@ -982,76 +1016,146 @@ def execute_action(
                 _g_ok = False
                 try:
                     from . import vlm_grounding as _vg
-                    _scr, _ox, _oy = _capture_screen()
+                    _full, _fox, _foy = _capture_screen()
+
+                    # ── 決定要給模型看多大範圍 ────────────────────────────
+                    # 這個模型的已知弱點是「一定會指一個最像的東西」，畫面上候選
+                    # 越多越容易指錯。所以先只給它一小塊看，不行才放大到整個螢幕。
+                    #
+                    # 範圍怎麼來：
+                    #   拖過橘框 → 用橘框
+                    #   沒拖過   → 用「錄製座標 ±cv_search_radius」
+                    #             這正是編輯器裡那個自動產生的橘框所畫的範圍，
+                    #             也是 CV 的預設搜尋範圍。
+                    # ⚠ 2026-08-06 修正：這裡原本只讀 search_region，沒拖過就把
+                    #   整個螢幕丟給模型 —— 同一個橘框 CV 遵守、直接定位卻無視，
+                    #   使用者看到框卻不知道模型其實在看整片桌面。
                     _reg = _parse_search_region(action)
+                    if _reg is None and has_coord:
+                        _r = max(1, int(cv_search_radius))
+                        _reg = (int(fx) - _r, int(fy) - _r, _r * 2, _r * 2)
+
+                    def _crop(reg):
+                        """把整螢幕裁成 reg。回 (影像, 原點x, 原點y, 標籤)。"""
+                        if reg is None:
+                            return _full, _fox, _foy, "整個螢幕"
+                        _l, _t, _w, _h = reg
+                        _x0, _y0 = max(0, _l - _fox), max(0, _t - _foy)
+                        _x1 = min(_full.shape[1], _x0 + _w)
+                        _y1 = min(_full.shape[0], _y0 + _h)
+                        if _x1 <= _x0 or _y1 <= _y0:
+                            return _full, _fox, _foy, "整個螢幕（指定範圍與螢幕無交集）"
+                        return (_full[_y0:_y1, _x0:_x1], _fox + _x0, _foy + _y0,
+                                f"限定範圍 {_x1 - _x0}x{_y1 - _y0}")
+
+                    # 兩段嘗試：先小範圍（準），失敗才整個螢幕（不失去現有能力）
+                    _attempts = [_crop(_reg)]
                     if _reg is not None:
-                        _l, _t, _w, _h = _reg
-                        _x0, _y0 = max(0, _l - _ox), max(0, _t - _oy)
-                        _x1 = min(_scr.shape[1], _x0 + _w)
-                        _y1 = min(_scr.shape[0], _y0 + _h)
-                        if _x1 > _x0 and _y1 > _y0:
-                            _scr = _scr[_y0:_y1, _x0:_x1]
-                            _ox, _oy = _ox + _x0, _oy + _y0
-                    import cv2 as _cv2
-                    # 一定要寫在共用交換目錄 —— Windows 的 %TEMP% 沒掛進容器，
-                    # 容器會回「No such file or directory」（2026-08-03 實測）。
-                    # 檔名也只用 ASCII，避免路徑編碼問題。
-                    _png = str(_vg.shared_dir() / f"_shot_{os.getpid()}_{index}.png")
-                    _ok_w, _enc = _cv2.imencode(".png", _scr)
-                    if not _ok_w:
-                        raise RuntimeError("截圖編碼失敗")
-                    Path(_png).write_bytes(_enc.tobytes())
-                    try:
-                        _ok, _gx, _gy, _why = _vg.locate(
-                            _g_prompt, _png, _scr.shape[1], _scr.shape[0], logger)
-                    finally:
+                        _attempts.append(_crop(None))
+
+                    def _verify(scr_, gx_, gy_) -> bool:
+                        """錨點局部驗證：模型指的那一塊，長得像不像錄製時的錨點。
+
+                        2026-08-03 實測：模型**不會承認找不到東西**。問它畫面上
+                        沒有的元素（例：在 Excel 裡問「開始播放投影片」按鈕），
+                        它會自信地指一個最像的位置。提示詞只擋得住最離譜的那種。
+                        → 步驟通常還留著錄製時的錨點圖，拿它跟「模型指的位置」做
+                          局部比對：像 = 採用；完全不像 = 判定幻覺。
+                          這裡是**局部**比對（只看那一小塊），跟 CV 全域搜尋不同 ——
+                          CV 全域找不到正是使用者選這個模式的原因。
+                        """
+                        if tpl_path is None or not Path(tpl_path).exists():
+                            return True          # 沒錨點圖可比，只能相信模型
                         try:
-                            os.unlink(_png)
-                        except OSError:
-                            pass
-                    if _ok:
-                        # ── 錨點局部驗證 ────────────────────────────────────
-                        # 2026-08-03 實測:模型**不會承認找不到東西**。問它畫面上
-                        # 沒有的元素(例:在 Excel 裡問「開始播放投影片」按鈕),
-                        # 它會自信地指一個最像的位置。提示詞只擋得住最離譜的那種。
-                        # → 步驟通常還留著錄製時的錨點圖,拿它跟「模型指的位置」
-                        #   做局部比對:像 = 採用;完全不像 = 判定幻覺、退回 CV。
-                        #   這裡是**局部**比對(只看那一小塊),跟 CV 全域搜尋不同 ——
-                        #   CV 全域找不到正是使用者選這個模式的原因。
-                        _verified = True
-                        if tpl_path is not None and Path(tpl_path).exists():
+                            _tpl = _imread_unicode(Path(tpl_path))
+                            if _tpl is None:
+                                return True
+                            # 純色錨點跟任何東西比都 1.000（實測連雜訊都 1.000），
+                            # 拿它「驗證」等於蓋橡皮圖章。守不住就要講出來，
+                            # 不能讓使用者以為有守門。
+                            _v = _anchor_variance(_tpl)
+                            if _v < ANCHOR_MIN_VARIANCE:
+                                logger.warning(
+                                    f"[computer_use]   ⚠ 錨點 {Path(tpl_path).name} 幾乎沒有特徵"
+                                    f"（灰階變異數 {_v:.1f} < {ANCHOR_MIN_VARIANCE}）——"
+                                    f"幻覺守門對這張圖無效，這次定位沒有經過驗證。"
+                                    f"建議重圈一個含文字或邊框的範圍。")
+                                return True
+                            _th, _tw = _tpl.shape[:2]
+                            # 在座標周圍開一個小窗「搜尋」，而不是在座標上「對齊」。
+                            # 實測固定位置比對太脆：模型誤差 3px 相似度就從 1.00 掉到 0.31，
+                            # 誤差 11px 掉到 0.17 —— 跟幻覺的 0.02~0.07 只差一點點。
+                            # 開窗搜尋容許幾像素位移，正確結果的分數才拉得開。
+                            _mg = VLM_GROUNDING_VERIFY_MARGIN
+                            _sh, _sw = scr_.shape[:2]
+                            # ⚠ 目標在畫面邊緣時，直接依座標往兩邊截會讓窗比錨點
+                            #   還小，然後「比不了」就靜默放行 —— 等於邊緣位置永遠
+                            #   免驗證。2026-08-06 實測：模型指到 (5,5) 就這樣被放過。
+                            #   改成把窗整個推回畫面內，維持足夠大小再比。
+                            _ww, _wh = _tw + 2 * _mg, _th + 2 * _mg
+                            _wx0 = min(max(0, gx_ - _ww // 2), max(0, _sw - _ww))
+                            _wy0 = min(max(0, gy_ - _wh // 2), max(0, _sh - _wh))
+                            _win = scr_[_wy0:_wy0 + _wh, _wx0:_wx0 + _ww]
+                            if _win.shape[0] < _th or _win.shape[1] < _tw:
+                                # 整張畫面都比錨點小才會走到這 —— 真的比不了，
+                                # 但要講出來，不能讓人以為驗過了
+                                logger.warning(
+                                    f"[computer_use]   ⚠ 畫面({_sw}x{_sh})比錨點"
+                                    f"({_tw}x{_th})還小，這次定位沒有經過幻覺驗證")
+                                return True
+                            _score, _mode = _best_match_score(_win, _tpl)
+                            _v = _score >= VLM_GROUNDING_VERIFY_MIN
+                            logger.info(
+                                f"[computer_use]   錨點局部驗證 相似度 {_score:.3f}"
+                                f"（{_mode}、門檻 {VLM_GROUNDING_VERIFY_MIN}、"
+                                f"搜尋窗 ±{_mg}px）{'通過' if _v else ' ✗ 疑似幻覺'}")
+                            return _v
+                        except Exception as _ve:
+                            logger.debug(f"[computer_use]   局部驗證跳過：{_ve}")
+                            return True
+
+                    # 驗證也要放進迴圈 —— 小範圍指錯（驗證沒過）跟「沒定位到」一樣，
+                    # 都該讓它用整個螢幕再試一次，而不是直接放棄退回 CV。
+                    _hit = None
+                    _last_why = ""
+                    for _ai, (_scr, _ox, _oy, _tag) in enumerate(_attempts):
+                        logger.info(f"[computer_use]   VLM 定位範圍：{_tag}"
+                                    + ("（第 2 次嘗試）" if _ai else ""))
+                        import cv2 as _cv2
+                        # 一定要寫在共用交換目錄 —— Windows 的 %TEMP% 沒掛進容器，
+                        # 容器會回「No such file or directory」（2026-08-03 實測）。
+                        # 檔名也只用 ASCII，避免路徑編碼問題。
+                        _png = str(_vg.shared_dir() / f"_shot_{os.getpid()}_{index}_{_ai}.png")
+                        _ok_w, _enc = _cv2.imencode(".png", _scr)
+                        if not _ok_w:
+                            raise RuntimeError("截圖編碼失敗")
+                        Path(_png).write_bytes(_enc.tobytes())
+                        try:
+                            _ok, _gx, _gy, _why = _vg.locate(
+                                _g_prompt, _png, _scr.shape[1], _scr.shape[0], logger)
+                        finally:
                             try:
-                                _tpl = _imread_unicode(Path(tpl_path))
-                                if _tpl is not None:
-                                    _th, _tw = _tpl.shape[:2]
-                                    # 在座標周圍開一個小窗「搜尋」，而不是在座標上「對齊」。
-                                    # 實測固定位置比對太脆:模型誤差 3px 相似度就從 1.00 掉到 0.31,
-                                    # 誤差 11px 掉到 0.17 —— 跟幻覺的 0.02~0.07 只差一點點。
-                                    # 開窗搜尋容許幾像素位移，正確結果的分數才拉得開。
-                                    _mg = VLM_GROUNDING_VERIFY_MARGIN
-                                    _y0 = max(0, _gy - _th // 2 - _mg)
-                                    _x0 = max(0, _gx - _tw // 2 - _mg)
-                                    _win = _scr[_y0:_gy + _th // 2 + _mg,
-                                                _x0:_gx + _tw // 2 + _mg]
-                                    if (_win.shape[0] >= _th and _win.shape[1] >= _tw):
-                                        _score, _mode = _best_match_score(_win, _tpl)
-                                        _verified = _score >= VLM_GROUNDING_VERIFY_MIN
-                                        logger.info(
-                                            f"[computer_use]   錨點局部驗證 相似度 {_score:.3f}"
-                                            f"（{_mode}、門檻 {VLM_GROUNDING_VERIFY_MIN}、"
-                                            f"搜尋窗 ±{_mg}px）"
-                                            f"{'通過' if _verified else ' ✗ 疑似幻覺'}")
-                            except Exception as _ve:
-                                logger.debug(f"[computer_use]   局部驗證跳過：{_ve}")
-                        if _verified:
-                            _sx, _sy = _ox + _gx, _oy + _gy
-                            logger.info(f"[computer_use]   VLM 定位 → 螢幕 ({_sx},{_sy})：{_why[:70]}")
-                            _do_click(pg, _sx, _sy, button, clicks, hold_sec, modifiers)
-                            return ActionResult(True, index, atype,
-                                f"{mods_tag}VLM 定位點擊 ({_sx},{_sy})：{_g_prompt[:40]}")
-                        logger.warning("[computer_use]   VLM 指的位置與錨點不符 → 退回 CV")
-                    else:
-                        logger.warning(f"[computer_use]   VLM 定位失敗（{_why}）→ 退回 CV")
+                                os.unlink(_png)
+                            except OSError:
+                                pass
+                        _last_why = _why
+                        if not _ok:
+                            logger.info(f"[computer_use]   {_tag}內沒定位到（{_why[:60]}）")
+                            continue
+                        if not _verify(_scr, _gx, _gy):
+                            logger.info(f"[computer_use]   {_tag}內指的位置與錨點不符")
+                            _last_why = "指的位置與錨點不符"
+                            continue
+                        _hit = (_ox + _gx, _oy + _gy, _why)
+                        break
+
+                    if _hit is not None:
+                        _sx, _sy, _why = _hit
+                        logger.info(f"[computer_use]   VLM 定位 → 螢幕 ({_sx},{_sy})：{_why[:70]}")
+                        _do_click(pg, _sx, _sy, button, clicks, hold_sec, modifiers)
+                        return ActionResult(True, index, atype,
+                            f"{mods_tag}VLM 定位點擊 ({_sx},{_sy})：{_g_prompt[:40]}")
+                    logger.warning(f"[computer_use]   VLM 定位失敗（{_last_why[:80]}）→ 退回 CV")
                 except Exception as _e:
                     logger.warning(
                         f"[computer_use]   VLM 定位例外（{_e.__class__.__name__}: {_e}）→ 退回 CV")
