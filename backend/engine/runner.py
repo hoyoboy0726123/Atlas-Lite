@@ -617,8 +617,13 @@ async def _run_inner(config_dict: dict, chat_id: int,
 
 # ── 主迴圈用到的小工具 ───────────────────────────────────────────────
 
-async def _run_computer_use(step, config, run, wd, resolve_path, log):
-    """跑一個桌面自動化節點。回傳帶 step_variables 的結果物件。"""
+async def _run_computer_use(step, run, resolve_path, log):
+    """跑一個桌面自動化節點。回傳帶 step_variables 的結果物件。
+
+    ⚠ 這支曾經多收 config / wd 兩個參數，但函式體從來沒用到，跟呼叫端對不上，
+      一執行就 TypeError 把整個 run 打掉 —— 桌面自動化節點等於完全不能用。
+      要加參數請先確認函式體真的用得到。
+    """
     from engine.computer_use import execute_computer_use_step
 
     # assets_dir 沒設時預設 <本次輸出夾>/<步驟名>_assets
