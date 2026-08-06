@@ -303,6 +303,28 @@ export async function getGroundingStatus(): Promise<GroundingStatus> {
   if (!res.ok) throw new Error('查詢 GUI 定位狀態失敗')
   return res.json()
 }
+export interface AnchorAnalysis {
+  index: number
+  checked: boolean
+  rivals: number
+  nearest_rival_px: number
+  reason: string
+}
+
+/** 算每張錨點在錄製當下的畫面上「還能對到幾個地方」。>0 代表回放時 CV 可能挑錯。 */
+export async function analyzeAnchors(
+  assetsDir: string,
+  actions: Record<string, unknown>[],
+): Promise<{ results: AnchorAnalysis[] }> {
+  const res = await fetch(`${BASE}/computer-use/assets/analyze-anchors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assets_dir: assetsDir, actions }),
+  })
+  if (!res.ok) throw new Error(await _readErrorDetail(res))
+  return res.json()
+}
+
 /** 把描述餵給地端定位模型，看它會不會點回錄製時的位置。 */
 export async function verifyGroundingDesc(
   assetsDir: string,

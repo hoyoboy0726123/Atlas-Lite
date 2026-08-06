@@ -142,6 +142,10 @@ export interface ComputerUseAction {
   search_region?: number[]
   // CV 嚴格鎖定範圍：true = 紅框內找不到立即 fail（不退附近、不退全螢幕、不退錄製座標）
   cv_strict_region?: boolean
+  // 錨點獨特性（錄製後分析填入，純提醒用、不影響執行）：
+  // 這張錨點在錄製當下的畫面上還對得到幾個地方。>0 代表回放時 CV 可能挑錯。
+  anchor_rivals?: number
+  anchor_nearest_rival_px?: number
   // 地端 GUI 定位模型：直接給座標（連 CV 都點不準時用；失敗自動退回 CV）
   vlm_mode?: 'off' | 'grounding'
   vlm_prompt?: string   // grounding 模式要定位的目標描述

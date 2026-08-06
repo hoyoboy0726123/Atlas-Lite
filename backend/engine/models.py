@@ -134,6 +134,17 @@ class ComputerUseAction(BaseModel):
     search_region: list[int] = []
     cv_strict_region: bool = False  # True = 框內找不到立即 fail
 
+    # ── 錨點獨特性（錄製後由 analyze_anchor_uniqueness 填，純提醒用）──
+    # CV 找的是「最像的」。當畫面上有好幾個長得一樣的東西（視窗標題列那三顆
+    # 按鈕、表格裡重複的圖示），回放時只要真目標跑掉一點，就可能挑中替身
+    # 點下去 —— 實測假匹配分數可以到 0.95 以上，調門檻擋不住。
+    #
+    # ⚠ 這兩個欄位**不影響執行行為**，只給面板顯示警告用。
+    #   試過依它自動鎖搜尋範圍，實測不可行（錄製當下的替身分佈預測不了
+    #   回放當下的）。要防就請使用者自己勾 cv_search_only_near 或畫紅框。
+    anchor_rivals: int = 0             # 除了真目標，錄製畫面上還有幾個相似位置
+    anchor_nearest_rival_px: int = 0   # 最近的替身離目標多遠
+
     # ── 控制流巢狀動作（if_image_found / retry_until）───────────────
     # 刻意保留為 list[dict]，不做遞迴 pydantic 驗證 —— execute_action 收的就是
     # dict，巢狀動作在執行時才逐一 .get()。避免 pydantic 自我遞迴的 model_rebuild 麻煩。

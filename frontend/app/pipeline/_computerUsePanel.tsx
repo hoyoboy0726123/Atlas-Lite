@@ -13,6 +13,7 @@ import {
   armComputerUseRecordingHotkey,
   disarmComputerUseRecordingHotkey,
   verifyGroundingDesc as verifyGroundingDescApi,
+  analyzeAnchors,
   getGroundingStatus,
 } from '@/lib/api'
 import type { GroundingStatus } from '@/lib/api'
@@ -164,11 +165,39 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     }
   }
 
+  // 錨點獨特性：index → { rivals, nearest_rival_px }
+  // 「這張錨點在錄製當下的畫面上還對得到幾個地方」。>0 代表回放時 CV 有機會
+  // 挑錯那一個 —— 而且假匹配分數可以到 0.95 以上，調門檻擋不住。
+  // 只提醒、不自動改行為（試過自動鎖搜尋範圍，實測不可行）。
+  const [anchorRisk, setAnchorRisk] = useState<Record<number, { rivals: number; nearest: number }>>({})
+
+  const runAnchorCheck = async (acts: ComputerUseAction[], dir: string) => {
+    if (!acts?.length || !dir) return
+    try {
+      const res = await analyzeAnchors(dir, acts as unknown as Record<string, unknown>[])
+      const map: Record<number, { rivals: number; nearest: number }> = {}
+      for (const r of res.results) {
+        if (r.checked && r.rivals > 0) {
+          map[r.index] = { rivals: r.rivals, nearest: r.nearest_rival_px }
+        }
+      }
+      setAnchorRisk(map)
+      const n = Object.keys(map).length
+      if (n > 0) {
+        toast.warning(`${n} 個錨點在畫面上不只一處相似，回放時可能點錯（見動作列表的 ⚠）`,
+          { duration: 7000 })
+      }
+    } catch (e) {
+      console.warn('anchor check:', e)   // 分析失敗不影響錄製結果
+    }
+  }
+
   const handleLoadRecording = async () => {
     try {
       const res = await loadComputerUseRecording(defaultAssetsDir)
       onUpdate({ actions: res.actions || [], assetsDir: defaultAssetsDir })
       toast.success(`已載入 ${res.actions?.length ?? 0} 個動作`)
+      runAnchorCheck(res.actions || [], defaultAssetsDir)
     } catch (e) {
       // 錄製尚未停好或目錄不存在是正常狀況
       console.warn('Load recording:', e)
@@ -398,6 +427,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
               動作序列（{data.actions?.length ?? 0}）
             </label>
             {data.actions && data.actions.length > 0 && (
+              <button
+                onClick={() => runAnchorCheck(data.actions!, data.assetsDir || defaultAssetsDir)}
+                title="檢查每張錨點在錄製當下的畫面上是不是獨一無二"
+                className="text-[11px] text-gray-400 hover:text-purple-600 mr-2"
+              >檢查錨點</button>
+            )}
+            {data.actions && data.actions.length > 0 && (
               <button onClick={async () => {
                 const dir = data.assetsDir || defaultAssetsDir
                 const alsoDelete = confirm(
@@ -560,6 +596,21 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       )}
                     </div>
                     {a.description && <p className="text-xs text-gray-600 mt-0.5 truncate">{a.description}</p>}
+                    {anchorRisk[i] && (
+                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-snug">
+                        ⚠ 這張錨點在錄製當下的畫面上還有 {anchorRisk[i].rivals} 個幾乎一樣的地方
+                        （最近的在 {anchorRisk[i].nearest}px 外）。
+                        視窗如果移動過，回放時可能點到那些地方之一。
+                        <br />
+                        建議擇一：改用 UIA 定位／
+                        <button
+                          type="button"
+                          onClick={() => onUpdate({ cvSearchOnlyNear: true })}
+                          className="underline hover:text-amber-900"
+                        >勾「只搜錄製座標附近」</button>
+                        （找不到就停，不會亂點）／把錨點框大一點含周邊文字。
+                      </p>
+                    )}
                     {a.text && <p className="text-xs text-gray-500 mt-0.5 truncate font-mono">"{a.text}"</p>}
                     {a.keys && a.keys.length > 0 && (
                       <p className="text-xs text-gray-500 mt-0.5 font-mono">{a.keys.join('+')}</p>

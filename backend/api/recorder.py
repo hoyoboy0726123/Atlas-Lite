@@ -145,6 +145,41 @@ async def grounding_status(force: bool = False):
     return await asyncio.get_event_loop().run_in_executor(None, capability, force)
 
 
+class AnchorAnalyzeRequest(BaseModel):
+    assets_dir: str
+    actions: list[dict]   # 整個步驟的動作序列（只有 click_image 之類的會被分析）
+
+
+@router.post("/computer-use/assets/analyze-anchors")
+async def analyze_anchors(req: AnchorAnalyzeRequest):
+    """算每張錨點在錄製當下的畫面上「能對上幾個地方」。
+
+    錄製完自動跑一次。畫面上有替身的錨點會拿到一個建議搜尋半徑，
+    前端顯示出來讓使用者知道並可調整 —— 這種事不該悄悄發生。
+    """
+    from engine.computer_use import analyze_anchor_uniqueness
+
+    assets = _validate_assets_path(req.assets_dir)
+    if not assets.is_dir():
+        raise HTTPException(status_code=404, detail=f"找不到 assets 目錄：{assets}")
+
+    loop = asyncio.get_event_loop()
+
+    def _run() -> list[dict]:
+        out = []
+        for i, a in enumerate(req.actions or []):
+            if not isinstance(a, dict) or not (a.get("image") or "").strip():
+                out.append({"index": i, "checked": False, "reason": "非錨點動作"})
+                continue
+            r = analyze_anchor_uniqueness(assets, a)
+            r["index"] = i
+            out.append(r)
+        return out
+
+    # 每張圖一次全螢幕 matchTemplate，20 個動作約 1~2 秒 —— 丟到 executor 別卡 event loop
+    return {"results": await loop.run_in_executor(None, _run)}
+
+
 class GroundingVerifyRequest(BaseModel):
     assets_dir: str
     action: dict      # 該步驟的 action dict（要有 image，最好也有 full_image）

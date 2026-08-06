@@ -420,6 +420,96 @@ def _parse_search_region(action: dict) -> Optional[tuple[int, int, int, int]]:
     return (l, t, w, h)
 
 
+# 錨點獨特性分析：把「這張圖在畫面上能對上幾個地方」算出來。
+# 門檻用 0.5（跟 CV 預設一致）—— 分數在門檻以上的都是回放時可能被挑中的候選。
+ANCHOR_RIVAL_THRESHOLD = 0.5
+
+
+def analyze_anchor_uniqueness(assets_dir: Path, action: dict,
+                              threshold: float = ANCHOR_RIVAL_THRESHOLD,
+                              max_peaks: int = 8) -> dict:
+    """算這張錨點在「錄製當下的整張畫面」上能對上幾個地方。
+
+    為什麼要算：CV 找的是「最像的」。如果畫面上有好幾個長得一樣的東西
+    （最典型的就是視窗標題列那三顆按鈕、表格裡重複的圖示），回放時只要
+    真目標稍微跑掉，它就會挑中替身點下去 —— 而且分數可以高到 0.95 以上，
+    調門檻擋不住。與其執行時猜，不如錄製時就把這件事量出來。
+
+    用錄製時存的 full_NNN.png（那一刻的整個畫面），不是「現在」的畫面 ——
+    現在的畫面跟錄製時可能完全不同，量出來的沒有意義。
+
+    回傳：
+      checked            有沒有真的算（沒有全螢幕圖就算不了）
+      rivals             除了真目標以外，還有幾個 ≥threshold 的候選
+      nearest_rival_px   最近的那個替身離真目標多遠
+      reason             人看的結論
+
+    ⚠ 這個函式只負責「量」，不決定執行行為。試過用它自動鎖搜尋半徑，
+      2026-08-06 實測不可行 —— 錄製當下的替身分佈預測不了回放當下的。
+    """
+    import cv2
+
+    def _skip(why: str) -> dict:
+        return {"checked": False, "rivals": 0, "nearest_rival_px": 0, "reason": why}
+
+    img_name = (action.get("image") or "").strip()
+    full_name = (action.get("full_image") or "").strip()
+    if not img_name:
+        return _skip("這個動作沒有錨點圖")
+    if not full_name:
+        return _skip("沒有錄製當下的全螢幕截圖，無法判斷")
+
+    tpl = _imread_unicode(assets_dir / img_name)
+    full = _imread_unicode(assets_dir / full_name)
+    if tpl is None or full is None:
+        return _skip("錨點圖或全螢幕截圖讀取失敗")
+
+    # 點擊點換算到全螢幕圖的座標系
+    cx = int(action.get("x", 0) or 0) - int(action.get("full_left", 0) or 0)
+    cy = int(action.get("y", 0) or 0) - int(action.get("full_top", 0) or 0)
+    H, W = full.shape[:2]
+    th, tw = tpl.shape[:2]
+    if not (0 <= cx < W and 0 <= cy < H):
+        return _skip("點擊座標不在全螢幕截圖範圍內")
+    if th >= H or tw >= W:
+        return _skip("錨點圖比全螢幕截圖還大")
+
+    g_full = cv2.cvtColor(full, cv2.COLOR_BGR2GRAY)
+    g_tpl = cv2.cvtColor(tpl, cv2.COLOR_BGR2GRAY)
+    try:
+        res = cv2.matchTemplate(g_full, g_tpl, cv2.TM_CCOEFF_NORMED)
+    except cv2.error as e:
+        return _skip(f"比對失敗：{e}")
+
+    # 逐一取峰值，取完就把周圍遮掉，避免同一個峰被算成好幾個
+    peaks: list[tuple[float, int, int]] = []
+    work = res.copy()
+    for _ in range(max_peaks):
+        _, val, _, loc = cv2.minMaxLoc(work)
+        if val < threshold:
+            break
+        peaks.append((float(val), loc[0] + tw // 2, loc[1] + th // 2))
+        work[max(0, loc[1] - th):loc[1] + th, max(0, loc[0] - tw):loc[0] + tw] = -1.0
+
+    if not peaks:
+        return _skip("錨點在自己的錄製截圖上都對不到，可能是錄壞了")
+
+    # 離點擊點最近的那個峰值視為「真目標」，其餘都是替身
+    peaks.sort(key=lambda p: (p[1] - cx) ** 2 + (p[2] - cy) ** 2)
+    rivals = peaks[1:]
+    if not rivals:
+        return {"checked": True, "rivals": 0, "nearest_rival_px": 0,
+                "reason": "錨點在錄製畫面上是獨一無二的"}
+
+    nearest = min(int(((r[1] - cx) ** 2 + (r[2] - cy) ** 2) ** 0.5) for r in rivals)
+    return {
+        "checked": True,
+        "rivals": len(rivals),
+        "nearest_rival_px": nearest,
+        "reason": f"錄製畫面上還有 {len(rivals)} 個長得幾乎一樣的地方，最近的在 {nearest}px 外",
+    }
+
+
 def verify_grounding_desc(assets_dir: Path, action: dict, desc: str) -> tuple[bool, float, str]:
     """把描述餵回地端定位模型，看它能不能回到錄製時的點擊位置。回 (通過, 誤差px, 說明)。
 
@@ -876,6 +966,16 @@ def execute_action(
             # 使用者明確指定的搜尋紅框（優先於錄製座標附近搜尋）
             region_rect = _parse_search_region(action)
             cv_strict = bool(action.get("cv_strict_region", False))
+
+            # ⚠ 這裡曾經試過「錄製時算出安全半徑、執行時自動鎖範圍」，
+            #   2026-08-06 實測證明不可行 —— 錄製當下的替身分佈預測不了回放當下的
+            #   （桌面上開了什麼視窗會變，新的替身會冒出來）。實驗中自動半徑
+            #   開與關都一樣誤點 764px。已移除，不要再照那個方向做。
+            #
+            #   目前唯一實測有效的是「限制搜尋範圍 + 找不到就停」，
+            #   由使用者自己決定：cv_search_only_near / search_region + cv_strict_region。
+            #   錄製後的錨點獨特性分析（analyze_anchor_uniqueness）只負責提醒，
+            #   不自動改行為。
 
             def _search(nx_: Optional[int], ny_: Optional[int],
                         force_region: Optional[tuple[int, int, int, int]] = "use_outer",
