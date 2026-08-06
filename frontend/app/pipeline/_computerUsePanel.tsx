@@ -178,7 +178,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     flat?: boolean; variance?: number
   }>>({})
 
-  const runAnchorCheck = async (acts: ComputerUseAction[], dir: string) => {
+  // silent = 自動重算（設定一改就跑），不跳 toast；只有錄完 / 手動按按鈕才跳
+  const runAnchorCheck = async (acts: ComputerUseAction[], dir: string, silent = false) => {
     if (!acts?.length || !dir) return
     try {
       const res = await analyzeAnchors(dir, acts as unknown as Record<string, unknown>[], {
@@ -198,6 +199,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
         }
       }
       setAnchorRisk(map)
+      if (silent) return
       const nFlat = Object.values(map).filter(m => m.flat).length
       const nRival = Object.keys(map).length - nFlat
       if (nFlat > 0) {
@@ -208,10 +210,45 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
         toast.warning(`${nRival} 個錨點在搜尋範圍內不只一處相似，回放時可能點錯（見動作列表的 ⚠）`,
           { duration: 7000 })
       }
+      if (nFlat === 0 && nRival === 0) {
+        toast.success('錨點檢查通過：搜尋範圍內沒有會混淆的相似處')
+      }
     } catch (e) {
       console.warn('anchor check:', e)   // 分析失敗不影響錄製結果
     }
   }
+
+  // ── 設定一改就重算警告 ────────────────────────────────────────────
+  // 警告是「依目前設定判斷風險」，設定變了卻不重算就會說謊：
+  // 縮小橘框把風險解掉了紅字還掛著；半徑從 400 調到 1500 引入新風險卻一片安靜
+  // —— 後者更危險。連警告自己那個「勾只搜附近」的連結按下去都不會重算。
+  // 只看真正影響判定的欄位，debounce 500ms 避免拖框 / 打字時狂打後端。
+  const riskSignature = JSON.stringify({
+    dir: data.assetsDir || defaultAssetsDir,
+    radius: data.cvSearchRadius ?? 400,
+    threshold: data.cvThreshold ?? 0.5,
+    onlyNear: data.cvSearchOnlyNear === true,
+    acts: (data.actions || []).map(a => [
+      a.type, a.image, a.x, a.y,
+      (a as { search_region?: number[] }).search_region,
+      (a as { cv_strict_region?: boolean }).cv_strict_region,
+      (a as { confidence?: number }).confidence,
+    ]),
+  })
+  useEffect(() => {
+    const acts = data.actions || []
+    if (!acts.some(a => a.type === 'click_image' && a.image)) {
+      setAnchorRisk({})
+      return
+    }
+    const t = setTimeout(() => {
+      runAnchorCheck(acts, data.assetsDir || defaultAssetsDir, true)
+    }, 500)
+    return () => clearTimeout(t)
+    // riskSignature 已涵蓋所有會影響結果的輸入；放 data.actions 會因為
+    // 每次 onUpdate 產生新陣列而無謂重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riskSignature])
 
   const handleLoadRecording = async () => {
     try {
