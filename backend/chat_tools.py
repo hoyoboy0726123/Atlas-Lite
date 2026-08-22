@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Callable, Optional
 
 import db
@@ -225,6 +226,54 @@ def _validate_yaml(yaml_content: str) -> str:
     return ""
 
 
+_XREF_RE = re.compile(r"\{\{\s*steps\.(.+?)\.output\.(.+?)\s*\}\}")
+
+
+def _check_xrefs(steps: list, target_idx: int, actions: list) -> str:
+    """檢查動作裡的 {{ steps.X.output.Y }} 引用得通不通。回錯誤訊息，沒問題回空字串。
+
+    ⚠ 為什麼要在寫入前擋：實測 gpt-oss 會把步驟名記錯
+      （實際是「讀憑證金額」，它寫成「讀取金額」）。執行時 Jinja 會拋
+      「'dict object' has no attribute '讀取金額'」—— 訊息是對的，但使用者要等到
+      真的跑工作流才發現，而助手**當下就有辦法知道**（步驟名它剛讀過）。
+
+    順便用機制保證「取值動作要排在填值動作之前」這條規則 ——
+    光寫在提示詞裡，模型照樣會把順序弄反。
+    """
+    names = [(s.get("name") or "") for s in steps if isinstance(s, dict)]
+    problems: list[str] = []
+    for i, a in enumerate(actions):
+        if not isinstance(a, dict):
+            continue
+        for v in a.values():
+            if not isinstance(v, str):
+                continue
+            for step_ref, var_ref in _XREF_RE.findall(v):
+                step_ref, var_ref = step_ref.strip(), var_ref.strip()
+                if step_ref not in names:
+                    problems.append(
+                        f"第 {i+1} 個動作引用了步驟「{step_ref}」，但這個工作流沒有這個步驟。"
+                        f"實際有：{'、'.join(n for n in names if n)}")
+                    continue
+                src_idx = names.index(step_ref)
+                if src_idx >= target_idx:
+                    problems.append(
+                        f"第 {i+1} 個動作引用「{step_ref}」的變數，但那個步驟排在"
+                        f"目前這步{'之後' if src_idx > target_idx else '（就是本身）'}"
+                        f"—— 執行到這裡時變數還不存在。取值要排在填值之前。")
+                    continue
+                src = steps[src_idx]
+                saved = {(x.get("save_as") or "").strip()
+                         for x in (src.get("actions") or []) if isinstance(x, dict)}
+                saved.discard("")
+                if var_ref not in saved:
+                    problems.append(
+                        f"第 {i+1} 個動作引用 {step_ref}.output.{var_ref}，"
+                        f"但那個步驟沒有存這個變數。它存的是："
+                        + ("、".join(sorted(saved)) if saved else "（沒有任何 save_as）"))
+    return "\n".join(problems)
+
+
 def _step_names(yaml_content: str) -> list[str]:
     import yaml as _yaml
     try:
@@ -337,10 +386,10 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
         return f"這個工作流現有的 YAML 解析不了：{e}"
 
     steps = (spec or {}).get("steps") or []
-    target = None
-    for s in steps:
+    target, target_idx = None, -1
+    for i, s in enumerate(steps):
         if isinstance(s, dict) and (s.get("name") or "").strip() == step_name.strip():
-            target = s
+            target, target_idx = s, i
             break
     if target is None:
         have = "、".join((s.get("name") or "?") for s in steps if isinstance(s, dict))
@@ -406,6 +455,12 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
             log_lines.append(f"↕ 第 {idx+1} 個搬到第 {to+1} 個位置：{a.get('type')}")
         else:
             return f"不認得的 op「{kind}」—— 只能是 append/insert/set/delete/move"
+
+    # 跨節點引用要在寫入前擋掉錯的 —— 執行時才發現代表使用者已經在等工作流跑完了
+    xref_bad = _check_xrefs(steps, target_idx, actions)
+    if xref_bad:
+        return (f"這批修改的變數引用有問題，**沒有**執行：\n{xref_bad}\n"
+                f"修好再呼叫一次。不確定有哪些變數就先用 list_workflow_variables。")
 
     preview = "\n".join(f"  {x}" for x in log_lines)
     summary = (f"「{wf['name']}」的步驟「{step_name}」："

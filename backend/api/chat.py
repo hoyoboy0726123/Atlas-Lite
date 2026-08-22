@@ -46,6 +46,9 @@ async def chat_status():
     cap = llm.capability()
     return {"available": cap["available"], "reason": cap["reason"],
             "provider": cap.get("provider", ""), "model": cap.get("model", ""),
+            # 三態：local 本機 / internal 華碩內部 / external 外部廠商
+            "data_scope": cap.get("data_scope", ""),
+            "data_scope_label": cap.get("data_scope_label", ""),
             "data_stays_local": cap.get("data_stays_local", False)}
 
 

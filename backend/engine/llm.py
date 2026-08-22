@@ -70,6 +70,18 @@ class LlmError(RuntimeError):
     """LLM 呼叫失敗。訊息要能直接顯示給使用者看，講清楚下一步怎麼做。"""
 
 
+def _json_or_raise(r, what: str) -> dict:
+    """解析回應。⚠ 不能直接 r.json() —— 實測 AiHub 偶發回 HTTP 200 但 body 不是
+    JSON（HTML 錯誤頁或空的），直接解析會拋 JSONDecodeError 冒到最上層，
+    使用者看到「Expecting value: line 1 column 1」這種天書。
+    """
+    try:
+        return r.json() or {}
+    except Exception:
+        body = (r.text or "").strip()[:200]
+        raise LlmError(f"{what} 回的不是 JSON（HTTP {r.status_code}）：{body!r}")
+
+
 # ── 設定 ────────────────────────────────────────────────────
 def _cfg() -> dict:
     """設定頁優先，沒填就退 .env（跟 vlm_cloud / Telegram 同一套規則）。"""
@@ -136,8 +148,18 @@ def capability(cfg: Optional[dict] = None) -> dict:
                     "reason": (f"「{c['model']}」走 {svc}，請求內容會離開華碩。"
                                f"本專案在程式層鎖定 {'、'.join(sorted(_AIHUB_ALLOWED))}"),
                     "provider": p, "model": c["model"]}
+    # ⚠ 資料去向是三態，不是布林。gpt-oss 雖然「不出華碩」，但它跑在華碩的
+    #   伺服器上 —— 標成 data_stays_local 會讓 UI 顯示「地端」，使用者以為
+    #   對話內容不出這台電腦。那是不同的保證等級，不能混為一談。
+    scope = ("local" if p == "ollama"
+             else "internal" if c["model"] == "gpt-oss"
+             else "external")
     return {"available": True, "reason": "", "provider": p, "model": c["model"],
-            "data_stays_local": p == "ollama" or c["model"] == "gpt-oss"}
+            "data_scope": scope,
+            "data_scope_label": {"local": "本機", "internal": "華碩內部",
+                                 "external": "外部廠商"}[scope],
+            # 只有真的不離開這台電腦才是 True
+            "data_stays_local": scope == "local"}
 
 
 # ── 訊息攤平（AiHub 坑 5）───────────────────────────────────
@@ -242,6 +264,8 @@ _aihub = _AiHubState()
 
 
 def _aihub_token(client, base: str, api_key: str, force: bool = False) -> str:
+    import httpx
+
     with _aihub.lock:
         fresh = (_aihub.token
                  and _aihub.token_key == api_key
@@ -249,11 +273,25 @@ def _aihub_token(client, base: str, api_key: str, force: bool = False) -> str:
                  and time.time() - _aihub.token_at < _TOKEN_TTL)
         if fresh and not force:
             return _aihub.token
-    r = client.get(f"{base}/auth", headers={"Authorization": api_key})
+    try:
+        r = client.get(f"{base}/auth", headers={"Authorization": api_key})
+    except httpx.ConnectError as e:
+        raise LlmError(f"連不上 AiHub（{base}）—— 檢查網路或 VPN：{e}")
     if r.status_code in (401, 403):
         raise LlmError("AiHub 認證失敗 —— API KEY 不對或已停用")
-    r.raise_for_status()
-    tok = (r.json() or {}).get("token") or ""
+    if r.status_code >= 400:
+        # ⚠ 不要讓原始 HTTPStatusError 冒到使用者面前。實測正式區用測試區的
+        #   金鑰打 /auth 回的是 **500 不是 401** —— 使用者只會看到「Server error
+        #   500」，完全猜不到是環境選錯。把「換個環境試試」直接寫進訊息。
+        other = "stage" if base == _AIHUB_BASE["prod"] else "prod"
+        where = "正式區" if base == _AIHUB_BASE["prod"] else "測試區"
+        hint = ""
+        if base in _AIHUB_BASE.values():
+            hint = (f"　目前打的是{where}；"
+                    f"金鑰若是另一區發的，請在設定頁改成"
+                    f"{'測試區' if other == 'stage' else '正式區'}再試。")
+        raise LlmError(f"AiHub 認證端點回 HTTP {r.status_code}（{base}/auth）。{hint}")
+    tok = _json_or_raise(r, "AiHub /auth").get("token") or ""
     if not tok:
         raise LlmError("AiHub /auth 回了 200，但沒有 token 欄位")
     with _aihub.lock:
@@ -270,7 +308,7 @@ def _aihub_session(client, base: str, token: str) -> tuple[str, int]:
             return _aihub.sessions.pop()
     r = client.post(f"{base}/new_session", headers={"Authorization": token})
     r.raise_for_status()
-    sid = (r.json() or {}).get("session_id") or ""
+    sid = _json_or_raise(r, "AiHub /new_session").get("session_id") or ""
     if not sid:
         raise LlmError("AiHub /new_session 回了 200，但沒有 session_id 欄位")
     return sid, 0
@@ -322,7 +360,20 @@ def _aihub_chat(cfg: dict, prompt: str, temperature: float) -> str:
                 last_err = "401"
                 continue
             r.raise_for_status()
-            data = r.json() or {}
+            # ⚠ 不能直接 r.json()。實測 AiHub 偶發回非 JSON（HTTP 200 但 body 是
+            #   HTML 錯誤頁或空的）—— 直接解析會拋 JSONDecodeError 冒到最上層，
+            #   使用者看到的是「Expecting value: line 1 column 1」這種天書。
+            #   偶發的話重試一次通常就過了，所以第一次失敗就走重試路徑。
+            try:
+                data = r.json() or {}
+            except Exception:
+                body = (r.text or "").strip()[:200]
+                if attempt == 1:
+                    last_err = f"回應不是 JSON：{body!r}"
+                    log.warning(f"[llm] AiHub 回了非 JSON，重試一次：{body!r}")
+                    continue
+                raise LlmError(f"AiHub 回的不是 JSON（HTTP {r.status_code}）："
+                               f"{body!r} —— 重試後仍然如此，可能是閘道異常")
             err = data.get("error")
             # 坑 8：error 可能是字串 "null"/"None"，不能直接當真值判斷
             if err and str(err).strip().lower() not in ("null", "none", ""):
@@ -362,7 +413,7 @@ def _ollama_chat(cfg: dict, messages: list[dict], temperature: float) -> str:
             raise LlmError(f"Ollama 找不到模型「{cfg['model']}」——"
                            f"先執行：ollama pull {cfg['model']}")
         raise LlmError(f"Ollama 回 HTTP {r.status_code}：{detail or '(沒有錯誤說明)'}")
-    data = r.json() or {}
+    data = _json_or_raise(r, "Ollama /api/chat")
     if data.get("error"):
         raise LlmError(f"Ollama 回報錯誤：{data['error']}")
     return ((data.get("message") or {}).get("content") or "")
@@ -415,6 +466,8 @@ def probe(cfg: Optional[dict] = None) -> dict:
         return {**out, "ok": False, "error": f"{type(e).__name__}: {e}"}
     return {**out, "ok": True, "elapsed_ms": int((time.time() - t0) * 1000),
             "reply": (reply or "").strip()[:120],
+            "data_scope": cap.get("data_scope", ""),
+            "data_scope_label": cap.get("data_scope_label", ""),
             "data_stays_local": cap.get("data_stays_local", False)}
 
 
@@ -435,5 +488,9 @@ def list_models(cfg: Optional[dict] = None) -> dict:
     except Exception as e:
         return {"ok": False, "models": [],
                 "error": f"問不到 Ollama 的模型列表（{base}）：{e}"}
-    names = [m.get("name", "") for m in (r.json() or {}).get("models", [])]
+    try:
+        names = [m.get("name", "") for m in (r.json() or {}).get("models", [])]
+    except Exception as e:
+        return {"ok": False, "models": [],
+                "error": f"Ollama 的模型列表不是 JSON（{base}）：{e}"}
     return {"ok": True, "source": base, "models": [n for n in names if n]}

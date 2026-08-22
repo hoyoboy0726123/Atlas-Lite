@@ -196,7 +196,10 @@ def _llm_payload() -> dict:
         "key_source": cfg["key_source"],
         "available": cap["available"],
         "reason": cap["reason"],
-        # 資料會不會離開這台機器 —— 挑模型時最該先看到的一件事
+        # 資料去向 —— 挑模型時最該先看到的一件事。三態，不是布林：
+        # local 不出這台電腦 / internal 送到華碩伺服器 / external 送到外部廠商
+        "data_scope": cap.get("data_scope", ""),
+        "data_scope_label": cap.get("data_scope_label", ""),
         "data_stays_local": cap.get("data_stays_local", False),
         "providers": ["ollama", "aihub"],
         "aihub_allowed_models": sorted(_llm._AIHUB_ALLOWED),

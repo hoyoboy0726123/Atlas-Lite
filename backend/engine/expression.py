@@ -117,6 +117,10 @@ _STEP_STR_FIELDS = (
 _ACTION_STR_FIELDS = (
     "text", "title", "title_contains", "vlm_prompt",
     "ocr_text", "window", "image", "image2",
+    # ocr_get_text 的標籤 —— 加 ocr_get_text 時漏了這裡。不 render 的話
+    # 「用上一步拿到的欄位名當標籤」寫了 {{ }} 也不會被替換，會拿字面字元
+    # 去找標籤 → 一定找不到，而且看起來像 OCR 讀不到。
+    "label",
 )
 
 

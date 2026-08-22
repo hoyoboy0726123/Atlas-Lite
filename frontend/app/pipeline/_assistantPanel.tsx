@@ -32,6 +32,21 @@ interface Turn {
   error?: boolean
 }
 
+/**
+ * 資料去向是三態不是布林 —— 「跑在華碩伺服器」跟「不出這台電腦」
+ * 是不同等級的保證，混成一個「地端」標籤會誤導。
+ */
+const SCOPE_STYLE: Record<string, string> = {
+  local: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  internal: 'bg-sky-50 text-sky-700 border border-sky-200',
+  external: 'bg-amber-50 text-amber-700 border border-amber-200',
+}
+const SCOPE_TITLE: Record<string, string> = {
+  local: '模型跑在這台電腦上，對話內容不會離開本機',
+  internal: '模型跑在華碩自建的伺服器上：內容會離開這台電腦，但不會送到外部廠商',
+  external: '模型在外部雲端廠商，對話內容會送到公司外',
+}
+
 /** 工具名 → 人話。直接顯示函式名等於要使用者讀原始碼。 */
 const TOOL_LABEL: Record<string, string> = {
   list_workflows: '列出工作流',
@@ -70,7 +85,7 @@ export default function AssistantPanel({
     if (!open) return
     chatStatus().then(setStatus).catch(() => setStatus({
       available: false, reason: '連不上後端', provider: '', model: '',
-      data_stays_local: false,
+      data_scope: '', data_scope_label: '', data_stays_local: false,
     }))
   }, [open])
 
@@ -148,13 +163,9 @@ export default function AssistantPanel({
         <span className="text-sm font-medium text-gray-800">AI 助手</span>
         {status?.available && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${
-            status.data_stays_local
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-amber-50 text-amber-700 border border-amber-200'}`}
-            title={status.data_stays_local
-              ? '這個模型跑在本機，對話內容不會離開這台電腦'
-              : '這個模型在雲端，對話內容會送出去'}>
-            {status.model}{status.data_stays_local ? '・地端' : '・雲端'}
+            SCOPE_STYLE[status.data_scope] ?? SCOPE_STYLE.external}`}
+            title={SCOPE_TITLE[status.data_scope] ?? SCOPE_TITLE.external}>
+            {status.model}・{status.data_scope_label || '雲端'}
           </span>
         )}
         <button type="button" onClick={onClose}

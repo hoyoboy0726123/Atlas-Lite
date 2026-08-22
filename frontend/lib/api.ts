@@ -515,7 +515,10 @@ export interface ChatStatus {
   reason: string
   provider: string
   model: string
-  /** 內容會不會離開這台機器 —— 挑模型時最該先看到的一件事 */
+  /** 資料去向三態：local 本機 / internal 華碩內部 / external 外部廠商 */
+  data_scope: string
+  data_scope_label: string
+  /** 只有真的不離開這台電腦才是 true（華碩自建的 gpt-oss 不算） */
   data_stays_local: boolean
 }
 
@@ -589,6 +592,8 @@ export interface LlmSettings {
   key_source: string
   available: boolean
   reason: string
+  data_scope: string
+  data_scope_label: string
   data_stays_local: boolean
   providers: string[]
   aihub_allowed_models: string[]
@@ -624,7 +629,8 @@ export async function listLlmModels(): Promise<{
 
 export async function probeLlm(): Promise<{
   ok: boolean; provider: string; model: string; key_source: string
-  error?: string; elapsed_ms?: number; reply?: string; data_stays_local?: boolean
+  error?: string; elapsed_ms?: number; reply?: string
+  data_scope?: string; data_scope_label?: string; data_stays_local?: boolean
 }> {
   const res = await fetch(`${BASE}/settings/llm/probe`, { method: 'POST' })
   if (!res.ok) throw new Error(`測試連線失敗（HTTP ${res.status}）`)

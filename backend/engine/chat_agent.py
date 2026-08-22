@@ -85,9 +85,17 @@ _BASE_PROMPT = """你是 Atlas-Lite 的助手。Atlas-Lite 是一個桌面自動
   不讓字面的 {{變數名}} 被填進欄位。
 - 不確定有哪些變數時先叫 list_workflow_variables，不要猜名字。
 
-## 改東西之前要先問
-會動到工作流的工具預設 confirm=False，只回預覽。
-**等使用者明確說好，才用 confirm=True 呼叫第二次。** 不要自己決定要存。
+## 什麼時候可以直接寫入
+會動到工作流的工具有 confirm 參數。判準是**使用者有沒有授權這件事**：
+
+- 他用祈使句直接叫你做（「幫我加上去」「直接改」「就這樣做」「刪掉它」）
+  → 已經授權了，直接 confirm=True 做完。再問一次「要不要做」是把他剛講的話
+  退回去給他，很煩。
+- 他在問或在討論（「該怎麼做」「可以嗎」「有什麼方法」）
+  → 先 confirm=False 給預覽，講清楚你要改什麼，等他說好再 confirm=True。
+- 你不確定他要的到底是哪一種 → 走預覽。改錯東西比多問一句嚴重。
+
+**一次提問內同樣的修改只做一次。** 做完就告訴他結果，不要再呼叫同一個工具。
 
 ## 改動作序列一律用 patch_node_actions
 要加 / 改 / 刪某個步驟的動作時，用 patch_node_actions —— 它只動那一個步驟。
@@ -131,6 +139,27 @@ def _parse_tool_call(text: str) -> Optional[tuple[str, dict, str]]:
     if m2:
         return (m2.group(1).strip(), {}, text[:m2.start()].strip())
     return None
+
+
+# 「我在等工具 / 正在查詢」的旁白特徵。判斷要保守 —— 誤判會把一個正常的
+# 簡短回答硬推回去重問，使用者要多等一輪（每輪 5-20 秒）。
+_WAIT_WORDS = ("等待", "等候", "稍候", "稍等", "正在查詢", "正在讀取", "正在取得",
+               "查詢中", "讀取中", "執行中", "請稍", "工具回傳", "工具結果",
+               # 「我先查詢一下」這種也是旁白 —— 說要查卻沒輸出標籤，一樣沒人執行
+               "查詢一下", "查一下", "先查")
+
+
+def _looks_like_fake_wait(reply: str) -> bool:
+    """回覆是「宣稱在等工具」的旁白，而不是真正的答案。"""
+    s = (reply or "").strip()
+    # 長度是主要判準，關鍵詞是次要的。旁白都極短（實測「（等待工具回傳變數
+    # 列表）」14 字），而合法的回答就算含「查一下」也會帶上下文而變長
+    # （「請你到 UIA 面板看一下那個欄位的 auto_id…」42 字）。
+    # 門檻偏嚴是刻意的：誤判只是讓使用者多等一輪，但把一個有用的答案硬推回去
+    # 重問，比漏抓一個旁白更糟 —— 漏抓時使用者至少還看得到一句話。
+    if not s or len(s) > 40:
+        return False
+    return any(w in s for w in _WAIT_WORDS)
 
 
 def _run_tool(tools: dict, name: str, args: dict) -> str:
@@ -178,11 +207,26 @@ def run(messages: list[dict], tools: Optional[dict] = None,
     calls: list[dict] = []
     # 已經成功寫入過的 (工具, 參數) 指紋 —— 見下方冪等防護
     done_writes: set[str] = set()
+    nudged = False          # 「宣稱在等工具」只回推一次，避免來回鬼打牆
 
     for rnd in range(_MAX_ROUNDS):
         reply = llm.chat(convo, temperature=temperature)
         parsed = _parse_tool_call(reply)
         if not parsed:
+            # ⚠ 模型有時會回「（等待工具回傳變數列表）」這種話 —— 它以為自己
+            #   呼叫了工具，其實**沒有輸出 <tool> 標籤**，所以沒有人去執行。
+            #   不處理的話這句話就成了最終答案：使用者看到一句莫名其妙的話，
+            #   什麼也沒發生。實測 gpt-oss 約每三次會發生一次。
+            if not nudged and _looks_like_fake_wait(reply):
+                nudged = True
+                logger_msg = reply.strip()[:60]
+                log.info(f"[chat_agent] 模型宣稱在等工具卻沒輸出標籤，回推一次：{logger_msg!r}")
+                convo.append({"role": "assistant", "content": reply})
+                convo.append({"role": "user", "content": (
+                    "你沒有真的輸出工具標籤，所以什麼都沒有執行 —— 系統只看得到 "
+                    "<tool>…</tool><input>…</input> 這個格式，看不到你的旁白。"
+                    "現在請直接輸出標籤；如果其實不需要工具，就直接回答使用者。")})
+                continue
             return {"reply": reply.strip(), "tool_calls": calls, "rounds": rnd + 1}
 
         name, args, prefix = parsed

@@ -532,9 +532,13 @@ function LlmSection() {
       const r = await probeLlm()
       if (r.ok) {
         toast.success(`可以用（${r.elapsed_ms} ms，回「${r.reply}」）`, {
-          description: r.data_stays_local
-            ? '這個模型跑在本機，內容不會離開這台電腦'
-            : '⚠ 這個模型在雲端，對話內容會送出去',
+          // 三態：本機 / 華碩內部 / 外部廠商。「不出這台電腦」跟
+          // 「不出公司」是不同等級的保證，不能都寫成「地端」。
+          description: r.data_scope === 'local'
+            ? '模型跑在這台電腦上，內容不會離開本機'
+            : r.data_scope === 'internal'
+              ? '模型跑在華碩自建的伺服器上：內容會離開這台電腦，但不會送到外部廠商'
+              : '⚠ 模型在外部雲端廠商，對話內容會送到公司外',
         })
       } else {
         // 失敗訊息是寫給使用者看的（缺什麼、下一步怎麼做）—— 原樣顯示
