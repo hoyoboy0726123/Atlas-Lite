@@ -86,8 +86,14 @@ def _step_to_node(step: dict, idx: int) -> dict:
             #   會讓轉出來的 canvas 動作是空的 —— 使用者一碰畫布,autosave 就用空 canvas
             #   重生 YAML 蓋回 DB,辛苦挑的 auto_id 永久消失。
             "actions": step.get("actions", []),
-            "assetsDir": step.get("computer_use_assets_dir", ""),
-            "failFast": step.get("computer_use_fail_fast", True),
+            # 同上：欄位名要跟 models.py 的 Step 一致（assets_dir / fail_fast），
+            # 加 computer_use_ 前綴的話這兩個設定在匯入後就消失了。
+            "assetsDir": step.get("assets_dir", ""),
+            "failFast": step.get("fail_fast", True),
+            # cu_mode / uia_window 原本整個漏掉 —— UIA 節點匯入後會退回 pixel 模式，
+            # 且忘記目標視窗，回放時對著錯的視窗操作。
+            "cuMode": step.get("cu_mode", "pixel"),
+            "uiaWindow": step.get("uia_window", ""),
             "cvThreshold": step.get("cv_threshold", 0.5),
             "cvSearchOnlyNear": step.get("cv_search_only_near", False),
             "cvSearchRadius": step.get("cv_search_radius", 400),

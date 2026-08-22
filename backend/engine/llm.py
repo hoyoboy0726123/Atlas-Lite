@@ -180,17 +180,40 @@ def loads_loose(text: str) -> Any:
     m = _FENCE_RE.search(s)
     if m:
         s = m.group(1).strip()
+    if (v := _try_parse(s)) is not _MISS:
+        return v
+    for lo, hi in ((s.find("{"), s.rfind("}")), (s.find("["), s.rfind("]"))):
+        if lo != -1 and hi > lo:
+            if (v := _try_parse(s[lo:hi + 1])) is not _MISS:
+                return v
+    raise LlmError(f"模型的回覆不是 JSON，也挖不出 JSON 片段：{text[:200]}")
+
+
+# 哨兵。不能用 None 代表「解析失敗」—— 合法的 JSON `null` 就會被誤判。
+_MISS = object()
+_JSON_LIT_RE = re.compile(r"(?<![\"'\w])(true|false|null)(?![\"'\w])")
+
+
+def _try_parse(s: str) -> Any:
+    """json.loads，失敗再試 Python 字面值。解不出來回 _MISS。"""
     try:
         return json.loads(s)
     except Exception:
         pass
-    for lo, hi in ((s.find("{"), s.rfind("}")), (s.find("["), s.rfind("]"))):
-        if lo != -1 and hi > lo:
-            try:
-                return json.loads(s[lo:hi + 1])
-            except Exception:
-                continue
-    raise LlmError(f"模型的回覆不是 JSON，也挖不出 JSON 片段：{text[:200]}")
+    # 模型很常送單引號的「JSON」（{'op':'append'}）。literal_eval 只吃字面值、
+    # 不執行任何程式碼，拿來救這種輸出是安全的。
+    import ast
+    try:
+        return ast.literal_eval(s)
+    except Exception:
+        pass
+    # 還是不行才動 true/false/null。⚠ 這步會改到字串**內容**裡的同名字
+    #   （{'text':'true'} → {'text':True}），所以放最後 —— 原樣能解就不該走到這。
+    try:
+        return ast.literal_eval(_JSON_LIT_RE.sub(
+            lambda m: {"true": "True", "false": "False", "null": "None"}[m.group(1)], s))
+    except Exception:
+        return _MISS
 
 
 def embed(texts: list[str]) -> list[list[float]]:

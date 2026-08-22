@@ -65,7 +65,8 @@ import logging  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from api import fsops, recorder, runs, settings_api, triggers, workflows  # noqa: E402
+from api import (chat, fsops, recorder, runs, settings_api,  # noqa: E402
+                 triggers, workflows)
 from scheduler.manager import shutdown as sched_shutdown  # noqa: E402
 from scheduler.manager import start as sched_start  # noqa: E402
 
@@ -85,7 +86,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for _r in (settings_api, workflows, runs, recorder, fsops, triggers):
+for _r in (settings_api, workflows, runs, recorder, fsops, triggers, chat):
     app.include_router(_r.router)
 
 _folder_watch_task = None
