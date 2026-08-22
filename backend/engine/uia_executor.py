@@ -126,7 +126,10 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
         return None
 
     # 組 kwargs
-    kwargs = {"searchDepth": control_def.get("depth", 10)}
+    # ⚠ 預設深度 10 對原生 app 夠,但**網頁表單一律搜不到** —— 瀏覽器把頁面內容
+    #   埋在自己的外框底下,實測 Edge 上一個平常的表單欄位在深度 13-14(樹深 15)。
+    #   症狀:inspect_window 看得到 auto_id、_find_control 卻回「找不到控制項」。
+    kwargs = {"searchDepth": control_def.get("depth", 30)}
     if name:
         kwargs["Name"] = name
     if auto_id:
@@ -372,19 +375,33 @@ def execute_uia_action(action: dict, step_window: str,
             if not ctrl or not ctrl.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到控制項:{action.get('control')}")
             # 優先取 Value pattern、退到 Name
-            text = ""
-            try:
-                vp = ctrl.GetValuePattern()
-                text = vp.Value if vp else ""
-            except Exception:
-                pass
+            # 取欄位「值」——不是標籤。三段式,每段都記錄走哪條,別靜默退回 Name。
+            # ⚠ 舊寫法用 ctrl.GetValuePattern(),但 _find_control 在沒指定 type 時回的是
+            #   **通用 Control 物件,它沒有 GetValuePattern 方法** → AttributeError 被
+            #   except 吞掉 → 悄悄退回讀 Name。症狀是「讀欄位讀回一堆欄位標題」,
+            #   看起來像成功、其實全錯。通用 Control 要用 GetPattern(PatternId.xxx)。
+            text, via = "", ""
+            for _pid_name in ("ValuePattern", "LegacyIAccessiblePattern"):
+                _pid = getattr(getattr(auto, "PatternId", None), _pid_name, None)
+                if _pid is None:
+                    continue
+                try:
+                    _p = ctrl.GetPattern(_pid)
+                    _v = getattr(_p, "Value", None) if _p else None
+                    if _v:
+                        text, via = str(_v), _pid_name
+                        break
+                except Exception as _e:
+                    log.debug(f"[uia] {_pid_name} 取值失敗:{_e}")
             if not text:
-                text = ctrl.Name or ""
+                # 走到這代表控制項沒有 value(例:純標籤、按鈕),Name 才是它的內容。
+                # 但對輸入框而言 Name 是**標籤**不是值 —— 明講出來。
+                text, via = (ctrl.Name or ""), "Name(注意:輸入框的 Name 是標籤、不是值)"
             save_as = (action.get("save_as") or "").strip()
             if save_as:
-                return UiaActionResult(True, f"讀到 {text[:60]!r}、存到 {save_as}",
+                return UiaActionResult(True, f"讀到 {text[:60]!r}(via {via})、存到 {save_as}",
                                        saved_var=(save_as, text))
-            return UiaActionResult(True, f"讀到 {text[:60]!r}(沒設 save_as)")
+            return UiaActionResult(True, f"讀到 {text[:60]!r}(via {via}、沒設 save_as)")
 
         elif atype == "uia_get_table_rowcount":
             grid = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))

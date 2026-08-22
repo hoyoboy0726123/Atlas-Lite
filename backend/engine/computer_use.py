@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -398,6 +399,9 @@ class ActionResult:
     action_type: str
     message: str = ""
     duration_ms: int = 0
+    # (變數名, 值) —— ocr_get_text 等「取值」動作用。對齊 uia_executor 的 save_as 機制,
+    # 讓 pixel 路徑也能把讀到的東西存進 step_variables 給後續 {{變數}} 用。
+    saved_var: "Optional[tuple[str, Any]]" = None
 
 
 def _check_abort(run_id: Optional[str]) -> None:
@@ -832,11 +836,16 @@ def execute_action(
     cv_coord_fallback: bool = False,
     ocr_threshold: float = 0.6,
     ocr_cv_fallback: bool = False,
+    step_variables: "Optional[dict]" = None,
     _depth: int = 0,
 ) -> ActionResult:
     """執行單一 action。action 是 ComputerUseAction.model_dump() 結果的 dict。
     _depth: 遞迴深度（if_image_found / retry_until 巢狀時累加），防寫爛的 YAML 無限遞迴。"""
     t0 = time.time()
+    # ⚠ 不能寫 `step_variables or {}` —— 空 dict 是 falsy,會換成另一個物件,
+    #   巢狀動作存進去的變數就傳不回父層,而且是靜默的。
+    if step_variables is None:
+        step_variables = {}
     atype = action.get("type", "")
     desc = action.get("description") or atype
     indent = "  " * _depth if _depth > 0 else ""
@@ -861,6 +870,7 @@ def execute_action(
         "cv_coord_fallback": cv_coord_fallback,
         "ocr_threshold": ocr_threshold,
         "ocr_cv_fallback": ocr_cv_fallback,
+        "step_variables": step_variables,   # 巢狀子動作也要能用 {{變數}}
     }
 
     try:
@@ -1510,20 +1520,65 @@ def execute_action(
             text = action.get("text", "")
             if not text:
                 return ActionResult(False, index, atype, "type_text 缺 text 欄位")
-            # interval 控制打字節奏（每個字之間的間隔秒數）；中文用 write 可能失效，改 copy-paste
-            if any(ord(c) > 127 for c in text):
-                import pyperclip
+            if "{{" in text:
                 try:
+                    from .uia_executor import _substitute_vars
+                    _before = text
+                    text = _substitute_vars(text, step_variables)
+                    if text != _before:
+                        logger.info(f"[computer_use] type_text 變數替換：{_before[:40]!r} → {text[:40]!r}")
+                except Exception as _e:
+                    logger.warning(f"[computer_use] type_text 變數替換失敗:{_e}")
+                # ⚠ _substitute_vars 找不到變數時**原樣保留**,不擋的話會把「{{金額}}」
+                #   這幾個字面字元打進金額欄位,而且動作回報成功 —— 靜默填錯值。
+                _left = re.findall(r"\{\{[^}]*\}\}", text)
+                if _left:
+                    return ActionResult(
+                        False, index, atype,
+                        f"變數未定義:{_left[:3]} —— 目前有的變數:{list(step_variables) or '(空)'}。"
+                        f"拒絕把字面 {{{{}}}} 填進欄位。"
+                        f"檢查:取值動作是否排在這一步之前、變數名是否一致")
+            # ⚠ 一律走剪貼簿貼上,不要用 pg.write 逐字打。
+            #   實測(中文 Windows):輸入法在啟用狀態時會攔截 pg.write 送出的按鍵 ——
+            #   填「40,425」實際填進去變成「ˋ誒ㄓ」,而且**動作回報成功**。
+            #   要逐字打(某些欄位擋貼上)就設 type_method: "keys"。
+            _method = (action.get("type_method") or "clipboard").lower()
+            # 含換行/Tab 一律逐字打:pyautogui 把它們當 Enter / Tab **按鍵**送出
+            # (錄製的 "帳號\t密碼\n" 靠這個跳欄送出);走貼上會被單行欄位吃掉。
+            if _method != "keys" and ("\n" in text or "\t" in text):
+                _method = "keys"
+                logger.info("[computer_use] type_text 含換行/Tab、改走逐字打(保留按鍵語意)")
+            if _method != "keys":
+                try:
+                    # ⚠ import 要在 try 內。放外面的話沒裝 pyperclip 會直接往上炸,
+                    #   走不到下面的逐字打 fallback。
+                    import pyperclip
+                    _prev = None
+                    try:
+                        _p = pyperclip.paste()
+                        # 只在原本是「非空文字」時才還原。pyperclip 在 Windows 只讀
+                        # CF_UNICODETEXT,剪貼簿是圖片/檔案時回空字串;拿空字串 copy()
+                        # 會先清空再什麼都不放 —— 等於把使用者複製的圖片清掉。
+                        if isinstance(_p, str) and _p:
+                            _prev = _p
+                    except Exception:
+                        pass
                     pyperclip.copy(text)
                     pg.hotkey("ctrl", "v")
-                    msg = f"輸入非 ASCII 文字（clipboard）：{text[:30]}"
-                except Exception:
-                    # 沒 pyperclip 就 fallback
+                    time.sleep(0.15)
+                    if _prev is not None:
+                        try:
+                            pyperclip.copy(_prev)
+                        except Exception:
+                            pass
+                    msg = f"輸入文字（clipboard、IME 免疫）：{text[:30]}"
+                except Exception as _e:
+                    # 沒 pyperclip 只能退回逐字打 —— 明講風險,別讓人以為沒事
                     pg.write(text, interval=0.03)
-                    msg = f"輸入文字（逐字）：{text[:30]}"
+                    msg = f"輸入文字（逐字、clipboard 不可用:{_e}；輸入法可能攔截）：{text[:30]}"
             else:
                 pg.write(text, interval=0.03)
-                msg = f"輸入文字：{text[:30]}"
+                msg = f"輸入文字（逐字、注意輸入法可能攔截）：{text[:30]}"
 
         elif atype == "hotkey":
             keys = action.get("keys", [])
@@ -1791,6 +1846,74 @@ def execute_action(
                     f"assert 失敗：{timeout}s 內 {img_name} 未出現（最佳 {last_conf:.2f} < {threshold}）")
             msg = f"assert 通過：{img_name} 可見（conf={found_m.confidence:.2f}）"
 
+        elif atype == "ocr_get_text":
+            # 螢幕 OCR「取值」:找標籤、讀它旁邊的值、存進變數。
+            # 跟 assert_text 的差別 —— assert 只回「在不在」,這個回「值是多少」。
+            # ⚠ 目標若能被 UIA 看到,**優先用 uia_get_text**(讀結構比讀像素準)。
+            # ⚠ 值若來自「上傳的檔案」,用 ocr_file 對檔案做 —— 原檔解析度更高。
+            label = (action.get("label") or action.get("text") or "").strip()
+            save_as = (action.get("save_as") or "").strip()
+            if not label:
+                return ActionResult(False, index, atype, "ocr_get_text 缺 label 欄位（要找哪個標籤）")
+            if not save_as:
+                return ActionResult(False, index, atype, "ocr_get_text 缺 save_as 欄位（值要存進哪個變數）")
+            try:
+                from .ocr_file import read_field, AMOUNT_RE, IDENT_RE, TAXID_RE
+            except Exception as _e:
+                return ActionResult(False, index, atype, f"無法載入 OCR 取值模組：{_e}")
+            try:
+                from .ocr import _recognize as _ocr_recognize
+            except Exception as _e:
+                return ActionResult(False, index, atype, f"無法載入 OCR 模組：{_e}")
+
+            screen_bgr, sx, sy = _capture_screen()
+            ox, oy = sx, sy
+            region = _parse_search_region(action)
+            if region:
+                l, t_, w_, h_ = region
+                rl, rt = max(0, l - sx), max(0, t_ - sy)
+                screen_bgr = screen_bgr[rt:rt + h_, rl:rl + w_]
+                ox, oy = sx + rl, sy + rt
+                if screen_bgr.size == 0:
+                    return ActionResult(False, index, atype,
+                                        f"search_region {region} 超出螢幕範圍、裁出空白影像")
+            import asyncio as _aio
+            try:
+                _lang = action.get("lang_tag") or "zh-Hant-TW"
+                try:
+                    _words = _aio.run(_ocr_recognize(screen_bgr, _lang))
+                except RuntimeError as _re:
+                    if "running event loop" not in str(_re).lower():
+                        raise
+                    _lp = _aio.new_event_loop()
+                    try:
+                        _words = _lp.run_until_complete(_ocr_recognize(screen_bgr, _lang))
+                    finally:
+                        _lp.close()
+            except Exception as _e:
+                return ActionResult(False, index, atype, f"OCR 失敗：{_e}")
+            for _w in _words:
+                _w["x"] += ox
+                _w["y"] += oy
+
+            kind = (action.get("kind") or "amount").lower()
+            vre = {"amount": AMOUNT_RE, "ident": IDENT_RE,
+                   "taxid": TAXID_RE}.get(kind)  # any → None
+            hit = read_field(_words, label,
+                             direction=(action.get("direction") or "right"),
+                             value_re=vre,
+                             max_gap=int(action.get("max_gap", 600)))
+            if not hit:
+                # 抓不到就誠實失敗 —— 金額/單號填錯比填不到嚴重得多,不可猜
+                return ActionResult(False, index, atype,
+                                    f"找不到標籤「{label}」旁邊的值"
+                                    f"（方向={action.get('direction') or 'right'}、格式={kind}、"
+                                    f"OCR 共讀到 {len(_words)} 個詞）")
+            msg = (f"讀到 {hit['value']!r} → 變數 {save_as}"
+                   f"（標籤讀成「{hit['label_text']}」分數 {hit['label_score']}、"
+                   f"方向 {hit['direction']}）")
+            return ActionResult(True, index, atype, msg, saved_var=(save_as, hit["value"]))
+
         elif atype == "assert_text":
             # OCR 版本的 assert：驗證螢幕上應該有某段文字。
             # 常見用途：登入成功後檢查「歡迎回來」、錯誤訊息檢查、狀態列文字等。
@@ -1888,6 +2011,10 @@ def execute_action(
                     sub_action, assets_dir, sub_i, logger, run_id,
                     _depth=_depth + 1, **_exec_ctx,
                 )
+                # 巢狀動作(ocr_get_text 等)存的變數要收回父層 —— 不收的話後面
+                # {{變數}} 找不到值,會把字面字元填進欄位(靜默錯誤)
+                if getattr(sub_res, "saved_var", None):
+                    step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
                 if not sub_res.ok:
                     return ActionResult(False, index, atype,
                         f"if_image_found/{branch_label}[{sub_i+1}] "
@@ -1926,6 +2053,10 @@ def execute_action(
                         sub_a, assets_dir, sub_i, logger, run_id,
                         _depth=_depth + 1, **_exec_ctx,
                     )
+                    # 巢狀動作(ocr_get_text 等)存的變數要收回父層 —— 不收的話後面
+                    # {{變數}} 找不到值,會把字面字元填進欄位(靜默錯誤)
+                    if getattr(sub_res, "saved_var", None):
+                        step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
                     if not sub_res.ok:
                         attempt_do_ok = False
                         last_fail_reason = (f"第 {attempt} 輪 do[{sub_i+1}] "
@@ -1938,6 +2069,10 @@ def execute_action(
                         until_action, assets_dir, 0, logger, run_id,
                         _depth=_depth + 1, **_exec_ctx,
                     )
+                    # 巢狀動作(ocr_get_text 等)存的變數要收回父層 —— 不收的話後面
+                    # {{變數}} 找不到值,會把字面字元填進欄位(靜默錯誤)
+                    if getattr(until_res, "saved_var", None):
+                        step_variables[until_res.saved_var[0]] = until_res.saved_var[1]
                     if until_res.ok:
                         success = True
                         msg = f"retry_until 成功於第 {attempt}/{max_attempts} 輪（{until_res.message[:80]}）"
@@ -2225,7 +2360,8 @@ def execute_computer_use_step(
                                  cv_hover_wait_ms=cv_hover_wait_ms,
                                  cv_coord_fallback=cv_coord_fallback,
                                  ocr_threshold=ocr_threshold,
-                                 ocr_cv_fallback=ocr_cv_fallback)
+                                 ocr_cv_fallback=ocr_cv_fallback,
+                                 step_variables=step_variables)
         except RuntimeError as abort_err:
             logger.warning(f"[computer_use] {abort_err}")
             return StepResult(
@@ -2239,6 +2375,13 @@ def execute_computer_use_step(
                 step_variables=dict(step_variables),
             )
         messages.append(f"#{i+1} [{res.action_type}] {'OK' if res.ok else 'FAIL'}: {res.message}")
+
+        # 收 save_as 變數(ocr_get_text 等取值動作)。對齊上面 uia 路徑的作法,
+        # 讓 pixel 路徑取到的值也能被後續動作用 {{變數}} 引用。
+        if getattr(res, "saved_var", None):
+            _vn, _vv = res.saved_var
+            step_variables[_vn] = _vv
+            logger.info(f"[computer_use] 變數 {_vn} = {_vv!r:.80}")
 
         # （Atlas-Lite 移除「動作後 VLM 把關」）
         # 原本會截前後圖送雲端 VLM 比對 action.expected，不符就重試/中止/推 TG。

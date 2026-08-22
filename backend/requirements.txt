@@ -55,7 +55,7 @@ mss
 opencv-python
 numpy
 Pillow
-pyperclip  # 貼上非 ASCII（中文）文字時用
+pyperclip  # type_text 一律走剪貼簿貼上（IME 會攔截 pg.write 的逐字按鍵）
 # UIA：錄製時抓 UI element + 回放的 UIA-first 三層 fallback
 uiautomation; sys_platform == "win32"
 
@@ -65,6 +65,9 @@ uiautomation; sys_platform == "win32"
 # 依賴只有 onnxruntime ~50MB + 模型 ~15MB，首次執行會自動下載模型。
 rapidocr
 onnxruntime
+# ocr_file 的 PDF 路徑：把 PDF 頁面 render 成點陣圖再丟 OCR。
+# 選 pypdfium2 不選 PyMuPDF —— 後者是 AGPL，會傳染到整個專案。
+pypdfium2
 # 簡繁歸一化 —— RapidOCR 中文模型語料以簡體為主（「軟」會讀成「软」、
 # 「畫」讀成「画」），比對前雙邊都轉簡體。
 opencc-python-reimplemented

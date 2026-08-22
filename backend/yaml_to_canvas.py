@@ -82,7 +82,10 @@ def _step_to_node(step: dict, idx: int) -> dict:
     if step.get("computer_use"):
         return {**common, "type": "computerUse", "data": {
             **base_data,
-            "actions": step.get("computer_use_actions", []),
+            # ⚠ 這個 key 一定要跟 YAML/models.py 一致。寫成 computer_use_actions
+            #   會讓轉出來的 canvas 動作是空的 —— 使用者一碰畫布,autosave 就用空 canvas
+            #   重生 YAML 蓋回 DB,辛苦挑的 auto_id 永久消失。
+            "actions": step.get("actions", []),
             "assetsDir": step.get("computer_use_assets_dir", ""),
             "failFast": step.get("computer_use_fail_fast", True),
             "cvThreshold": step.get("cv_threshold", 0.5),

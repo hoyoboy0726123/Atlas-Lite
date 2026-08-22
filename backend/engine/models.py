@@ -159,6 +159,18 @@ class ComputerUseAction(BaseModel):
     # 上面 use_uia 那組是「錄製時自動抓的元素資訊」；這組是進階使用者
     # 透過 UIA Inspector 手動設定的，兩者是兩回事。
     ui: dict = {}                # 錄製時抓的 {"name","control_type","automation_id","window_title","rect"}
+    # ── ocr_get_text 專用欄位(螢幕 OCR 抓「標籤旁邊的值」)──
+    # ⚠ 這些欄位一定要宣告。ComputerUseAction 沒設 extra="allow",pydantic v2 預設
+    #   extra="ignore" —— 未宣告的欄位在 runner 的 model_dump() 會**靜默消失**,
+    #   面板試抓正常、YAML 存得下去,正式跑卻回「缺 label 欄位」;更糟的是
+    #   direction / kind 掉光會降回預設值,讀到旁邊完全不同的數字還回報成功。
+    label: str = ""              # 要找的標籤文字(例:總計金額)
+    direction: str = "right"     # right 同列右側 / below 表格欄位在下方
+    kind: str = "amount"         # amount 金額 / ident 單號 / taxid 統編(驗檢查碼) / any
+    max_gap: int = 600           # 標籤與值的最大距離(px)
+    lang_tag: str = ""           # OCR 語言標籤、留空走預設 zh-Hant-TW
+    type_method: str = ""        # type_text: clipboard(預設、IME 免疫)/ keys(逐字打)
+
     control: dict = {}           # {"type":"Button","name":"儲存","auto_id":"save-btn","depth":10}
     save_as: str = ""            # uia_get_text 等把值存到此變數名，後續 step 可用 {{...}}
     row: int | str = 0           # uia_click_cell 用，可填 "{{row_count + 1}}" 延後解析
