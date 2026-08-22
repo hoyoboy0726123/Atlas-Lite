@@ -29,6 +29,7 @@ import ConditionPanel               from './_conditionPanel'
 import TriggerPanel                 from './_triggerPanel'
 import HoverScrollRow               from './_hoverScrollRow'
 import Sidebar                from './_sidebar'
+import AssistantPanel         from './_assistantPanel'
 import {
   type AppNode, type StepData, type HumanConfirmData, type ComputerUseData, type ConditionData,
   type ScriptNode, type HumanConfirmNode, type ComputerUseNode, type ConditionNode,
@@ -394,6 +395,9 @@ export default function PipelinePage() {
 
   // ── Workflow Store ────────────────────────────────────────────────────────
   const { activeId, workflows, updateWorkflow, saveCanvas, createWorkflow } = useWorkflowStore()
+  // AI 助手側欄的開關與「問 AI」帶進來的節點狀態
+  const { assistantOpen, askAiContext, askAiQuestion,
+          closeAssistant, clearAskAiSeed } = useWorkflowStore()
 
   // 當 activeId 改變時，載入對應工作流（defer 避免 render-time setState）
   useEffect(() => {
@@ -1885,6 +1889,17 @@ export default function PipelinePage() {
       )}
 
       </div>{/* end right column */}
+
+      {/* AI 助手側欄。掛在最外層 —— 它是 fixed 定位，塞進右欄會被欄位的
+          overflow 裁掉。開關狀態走 store，因為觸發它的「問 AI」按鈕
+          在節點面板深處，中間隔了好幾層元件。 */}
+      <AssistantPanel
+        open={assistantOpen}
+        onClose={closeAssistant}
+        seedContext={askAiContext}
+        seedQuestion={askAiQuestion}
+        onSeedConsumed={clearAskAiSeed}
+      />
     </div>
   )
 }

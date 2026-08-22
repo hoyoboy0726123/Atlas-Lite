@@ -51,6 +51,10 @@ def _tools_block(tools: dict) -> str:
         "不需要工具時直接回答使用者，**絕對不要**輸出 <tool> 標籤，",
         "也不要宣稱「正在查詢」卻沒有實際輸出標籤 —— 那樣不會有人去執行。",
         "",
+        "⚠ **工具是你的，不是使用者的。** 使用者的畫面上沒有這些工具。",
+        "所以絕對不要寫「請用 patch_node_actions 工具加上去」「你可以呼叫 xxx」——",
+        "那對他毫無意義，等於你把該做的事推回去給他。要用工具就自己輸出 <tool> 標籤。",
+        "",
         "可用工具：",
     ]
     for name, t in tools.items():
@@ -172,6 +176,9 @@ def run(messages: list[dict], tools: Optional[dict] = None,
                 log.debug(f"[chat_agent] on_event 失敗:{e}")
 
     calls: list[dict] = []
+    # 已經成功寫入過的 (工具, 參數) 指紋 —— 見下方冪等防護
+    done_writes: set[str] = set()
+
     for rnd in range(_MAX_ROUNDS):
         reply = llm.chat(convo, temperature=temperature)
         parsed = _parse_tool_call(reply)
@@ -181,7 +188,32 @@ def run(messages: list[dict], tools: Optional[dict] = None,
         name, args, prefix = parsed
         emit({"type": "tool_start", "name": name, "args": args,
               "mutating": name in MUTATING})
+
+        # ⚠ 冪等防護：同一次提問裡，同樣的**寫入**只做一次。
+        #   實測(qwen3:8b)使用者說「好，你直接幫我加上去」之後，模型連續三輪
+        #   都輸出同一個 patch_node_actions(confirm=True) —— 每輪都真的寫進去，
+        #   使用者的步驟裡就多了三個一模一樣的 type_text。
+        #   模型看到「已寫入」的結果卻沒認出事情已經做完，光靠提示詞防不住。
+        #   只擋 confirm=True 的寫入；預覽重複無害。指紋只在這一次 run() 內有效，
+        #   使用者下一輪真的想再加一次，是新的對話、新的指紋集合。
+        wkey = ""
+        if name in MUTATING and args.get("confirm") is True:
+            wkey = json.dumps([name, args], ensure_ascii=False, sort_keys=True)
+            if wkey in done_writes:
+                result = (f"這個修改剛剛已經成功寫入了，不要重複執行。"
+                          f"直接告訴使用者已經完成，或問他還要不要改別的。")
+                emit({"type": "tool_end", "name": name, "result_preview": result})
+                calls.append({"name": name, "args": args, "result_preview": result,
+                              "skipped_duplicate": True})
+                convo.append({"role": "assistant", "content": reply})
+                convo.append({"role": "user", "content": f"[工具 {name} 的執行結果]\n{result}"})
+                continue
+
         result = _run_tool(tools, name, args)
+        # 只有**成功**才記指紋 —— 失敗的話模型該有機會改參數重試。
+        # 兩個 mutating 工具寫入成功時都回「已寫入」開頭（見 chat_tools）。
+        if wkey and result.startswith("已寫入"):
+            done_writes.add(wkey)
         if len(result) > _MAX_RESULT:
             result = result[:_MAX_RESULT] + f"\n…（結果太長，只帶前 {_MAX_RESULT} 字）"
         calls.append({"name": name, "args": args, "result_preview": result[:200]})

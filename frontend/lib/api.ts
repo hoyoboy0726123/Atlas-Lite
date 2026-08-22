@@ -508,6 +508,130 @@ export interface UiaInspectResult {
 }
 
 /** 檢視指定視窗的 UIA element tree(空 window = 當前 foreground)。 */
+// ── AI 助手 ──────────────────────────────────────────────
+/** 助手能不能用。不能用時 reason 會講清楚缺什麼。 */
+export interface ChatStatus {
+  available: boolean
+  reason: string
+  provider: string
+  model: string
+  /** 內容會不會離開這台機器 —— 挑模型時最該先看到的一件事 */
+  data_stays_local: boolean
+}
+
+export async function chatStatus(): Promise<ChatStatus> {
+  const res = await fetch(`${BASE}/pipeline/chat/status`)
+  if (!res.ok) throw new Error(`讀助手狀態失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
+export interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+/** 串流事件。注意串的是**工具事件**不是 token —— AiHub 沒有 streaming。 */
+export type ChatEvent =
+  | { type: 'tool_start'; name: string; args: Record<string, any>; mutating: boolean }
+  | { type: 'tool_end'; name: string; result_preview: string }
+  | { type: 'done'; reply: string; tool_calls: any[]; rounds: number; hit_round_limit?: boolean }
+  | { type: 'error'; detail: string }
+
+/**
+ * 跑一輪對話，逐一把事件交給 onEvent。
+ *
+ * 一次提問可能跑好幾輪工具、每輪 5-20 秒，所以事件要即時吐給使用者看 ——
+ * 全部做完才顯示等於讓人盯二十幾秒白屏。
+ */
+export async function chatStream(
+  req: { messages: ChatMessage[]; extra_context?: string; temperature?: number },
+  onEvent: (ev: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${BASE}/pipeline/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try { detail = (await res.json())?.detail || detail } catch { /* 保持原樣 */ }
+    onEvent({ type: 'error', detail })
+    return
+  }
+  if (!res.body) { onEvent({ type: 'error', detail: '沒有回應內容' }); return }
+
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    // NDJSON：一行一個事件。最後一段可能被切斷，留在 buf 等下一塊。
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      const s = line.trim()
+      if (!s) continue
+      try { onEvent(JSON.parse(s)) } catch { /* 半行 JSON，丟掉 */ }
+    }
+  }
+  const tail = buf.trim()
+  if (tail) { try { onEvent(JSON.parse(tail)) } catch { /* 同上 */ } }
+}
+
+// ── LLM 設定 ─────────────────────────────────────────────
+export interface LlmSettings {
+  llm_provider: string
+  llm_model: string
+  llm_base_url: string
+  llm_aihub_env: string
+  /** 金鑰哪來的：'vault' / 'env' / ''（沒有）。永遠不回金鑰本身。 */
+  key_source: string
+  available: boolean
+  reason: string
+  data_stays_local: boolean
+  providers: string[]
+  aihub_allowed_models: string[]
+  aihub_envs: string[]
+}
+
+export async function getLlmSettings(): Promise<LlmSettings> {
+  const res = await fetch(`${BASE}/settings/llm`)
+  if (!res.ok) throw new Error(`讀 LLM 設定失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
+export async function updateLlmSettings(patch: Partial<{
+  llm_provider: string; llm_model: string
+  llm_base_url: string; llm_aihub_env: string
+}>): Promise<LlmSettings> {
+  const res = await fetch(`${BASE}/settings/llm`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new Error(`存 LLM 設定失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
+export async function listLlmModels(): Promise<{
+  ok: boolean; models: string[]; source?: string; note?: string; error?: string
+}> {
+  const res = await fetch(`${BASE}/settings/llm/models`)
+  if (!res.ok) throw new Error(`讀模型清單失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
+export async function probeLlm(): Promise<{
+  ok: boolean; provider: string; model: string; key_source: string
+  error?: string; elapsed_ms?: number; reply?: string; data_stays_local?: boolean
+}> {
+  const res = await fetch(`${BASE}/settings/llm/probe`, { method: 'POST' })
+  if (!res.ok) throw new Error(`測試連線失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
+
 /** 螢幕 OCR 試抓結果。找不到時分兩種：標籤沒找到 / 標籤找到但旁邊沒有合格式的值。 */
 export interface OcrProbeResult {
   ok: boolean

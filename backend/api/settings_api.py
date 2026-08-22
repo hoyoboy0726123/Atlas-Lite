@@ -212,6 +212,17 @@ async def get_llm_settings():
 @router.put("/settings/llm")
 async def put_llm_settings(req: LlmSettingsRequest):
     patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    # 換供應商時，把不屬於新供應商的模型清掉。
+    # 不清的話設定頁會留著上一家的模型名（切到 AiHub 還顯示 qwen3:8b），
+    # 使用者以為設好了，實際上那個模型在新供應商底下根本不存在。
+    if "llm_provider" in patch and "llm_model" not in patch:
+        from engine import llm as _llm
+        cur = (get_settings().get("llm_model") or "").strip()
+        p = patch["llm_provider"]
+        stale = (cur and ((p == "aihub" and cur not in _llm._AIHUB_MODELS)
+                          or (p == "ollama" and cur in _llm._AIHUB_MODELS)))
+        if stale:
+            patch["llm_model"] = ""
     if patch:
         try:
             update_settings(**patch)

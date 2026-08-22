@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import OcrFieldInserter from './_ocrFieldInserter'
+import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -402,6 +403,16 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
               : '錄製滑鼠/鍵盤操作，以圖像錨點穩定回放'}
           </span>
         </div>
+        {/* ⚠ 這顆一定要放在上面那個 block truncate 的容器「外面」。
+            truncate 的 overflow:hidden + white-space:nowrap 會把按鈕文字裁掉／壓扁，
+            面板寬度固定時更明顯。 */}
+        <AskAiButton
+          className="shrink-0"
+          nodeLabel={`桌面自動化節點（${(data.cuMode || 'pixel') === 'uia' ? 'UIA 控制' : '像素錄製'}）`}
+          stepName={data.name}
+          uiaWindow={data.uiaWindow || ''}
+          actions={data.actions}
+        />
         <button onClick={onDelete} title="刪除" className="text-gray-300 hover:text-red-400 transition-colors p-1">🗑</button>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X className="w-4 h-4" /></button>
       </div>

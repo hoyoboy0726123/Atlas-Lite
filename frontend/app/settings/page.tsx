@@ -5,7 +5,7 @@
  *
  * Atlas 的設定頁有 3090 行 —— 模型選擇、副模型、thinking 模式、skill 套件、
  * MCP server、subagent 角色、長期記憶、網路搜尋、沙盒模式。那些在 Atlas-Lite
- * 全都不存在，所以這裡只剩四區：路徑、Telegram 通知、桌面自動化、Secrets。
+ * 全都不存在，所以這裡只剩：路徑、Telegram 通知、桌面自動化、視覺模型、AI 助手、Secrets。
  */
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -14,10 +14,11 @@ import { toast, Toaster } from 'sonner'
 
 import {
   deleteSecret, getComputerUseSettings, getEnvPaths, getGroundingStatus,
-  getNotificationSettings, getVlmSettings, listSecrets, probeVlm,
-  saveComputerUseSettings, saveNotificationSettings, saveVlmSettings, setSecret,
+  getLlmSettings, getNotificationSettings, getVlmSettings, listLlmModels,
+  listSecrets, probeLlm, probeVlm, saveComputerUseSettings,
+  saveNotificationSettings, saveVlmSettings, setSecret, updateLlmSettings,
   type ComputerUseSettings, type EnvPaths, type GroundingStatus,
-  type NotificationSettings, type SecretMeta, type VlmSettings,
+  type LlmSettings, type NotificationSettings, type SecretMeta, type VlmSettings,
 } from '@/lib/api'
 
 const cardCls = 'bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden'
@@ -55,6 +56,7 @@ export default function SettingsPage() {
         <NotificationSection />
         <ComputerUseSection />
         <VlmSection />
+        <LlmSection />
         <SecretsSection />
       </div>
     </div>
@@ -469,6 +471,224 @@ function VlmSection() {
                 ? '送一張小圖問顏色，確認模型真的讀得到圖片。'
                 : `尚不可用：${v?.reason || '設定未完成'}`}
             </span>
+          </div>
+        </>
+      )}
+    </Section>
+  )
+}
+
+// ── LLM（AI 助手）──────────────────────────────────────────────────
+// 只有兩家。刻意的 —— 不搬 Atlas 那一整包 langchain 依賴。
+// 沒設定的話助手反灰，工作流的錄製與執行完全不受影響。
+
+const LLM_PROVIDER_LABEL: Record<string, string> = {
+  ollama: 'Ollama（地端，免金鑰）',
+  aihub: 'AiHub（華碩內部）',
+}
+
+function LlmSection() {
+  const [v, setV] = useState<LlmSettings | null>(null)
+  const [model, setModel] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [models, setModels] = useState<string[]>([])
+  const [modelsNote, setModelsNote] = useState('')
+  const [probing, setProbing] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getLlmSettings().then(x => {
+      setV(x); setModel(x.llm_model); setBaseUrl(x.llm_base_url)
+    }).catch(() => {})
+  }, [])
+  useEffect(load, [load])
+
+  const provider = v?.llm_provider || ''
+
+  // 模型清單：Ollama 問本機拿真實清單，AiHub 回白名單。
+  // 讓使用者用選的 —— 打錯一個字（qwen3:8B）就是「找不到模型」。
+  useEffect(() => {
+    if (!provider) { setModels([]); setModelsNote(''); return }
+    listLlmModels().then(r => {
+      setModels(r.models || [])
+      setModelsNote(r.ok ? (r.note || '') : (r.error || ''))
+    }).catch(() => { setModels([]); setModelsNote('') })
+  }, [provider])
+
+  const save = async (patch: Parameters<typeof updateLlmSettings>[0]) => {
+    setBusy(true)
+    try {
+      const next = await updateLlmSettings(patch)
+      setV(next); setModel(next.llm_model); setBaseUrl(next.llm_base_url)
+      toast.success('已儲存')
+    } catch (e: any) {
+      toast.error(String(e?.message || e))
+    } finally { setBusy(false) }
+  }
+
+  const probe = async () => {
+    setProbing(true)
+    try {
+      const r = await probeLlm()
+      if (r.ok) {
+        toast.success(`可以用（${r.elapsed_ms} ms，回「${r.reply}」）`, {
+          description: r.data_stays_local
+            ? '這個模型跑在本機，內容不會離開這台電腦'
+            : '⚠ 這個模型在雲端，對話內容會送出去',
+        })
+      } else {
+        // 失敗訊息是寫給使用者看的（缺什麼、下一步怎麼做）—— 原樣顯示
+        toast.error('不能用', { description: r.error, duration: 12000 })
+      }
+    } catch (e: any) {
+      toast.error(String(e?.message || e))
+    } finally { setProbing(false) }
+  }
+
+  return (
+    <Section
+      title="AI 助手"
+      desc="卡住的時候可以問它。它看得到你的工作流，能直接幫你改動作設定。沒設定的話助手反灰，其他功能完全不受影響。"
+    >
+      {/* 供應商 */}
+      <div>
+        <label className="block text-sm text-gray-700 mb-1.5">供應商</label>
+        <div className="flex flex-wrap gap-2">
+          {['', 'ollama', 'aihub'].map(p => (
+            <button key={p} type="button" disabled={busy}
+              onClick={() => save({ llm_provider: p })}
+              className={`px-3 py-1.5 rounded-lg text-sm border whitespace-nowrap transition-colors ${
+                provider === p
+                  ? 'bg-indigo-600 border-indigo-600 text-white'
+                  : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+              {p === '' ? '不使用' : LLM_PROVIDER_LABEL[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {provider === 'ollama' && (
+        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200
+                      rounded-lg px-3 py-2 leading-relaxed">
+          ✓ 地端模式：對話內容<strong>不會離開這台電腦</strong>。
+          需要先啟動 Ollama（<code className="font-mono">ollama serve</code>）並
+          <code className="font-mono">ollama pull</code> 你要用的模型。
+        </p>
+      )}
+      {provider === 'aihub' && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200
+                        rounded-lg px-3 py-2 leading-relaxed space-y-1">
+          <p>
+            AiHub 底下掛了多家模型，只有 <code className="font-mono">gpt-oss</code> 是
+            <strong>華碩自建部署</strong>；其餘（Azure / Google / AWS）的請求內容會送到外部廠商。
+          </p>
+          <p>
+            本專案在程式層鎖定 gpt-oss，要放寬得改
+            <code className="font-mono"> backend/engine/llm.py </code>的白名單 —— 這是刻意的摩擦。
+          </p>
+          <p>
+            金鑰請放 <code className="font-mono">.env</code> 的
+            <code className="font-mono"> AIHUB_API_KEY</code>，或用下面的
+            Secrets 保險箱存成 <code className="font-mono">AIHUB_API_KEY</code>。
+            {v?.key_source
+              ? <span className="text-emerald-700 font-medium">
+                  {' '}✓ 已從 {v.key_source === 'vault' ? '保險箱' : '.env'} 讀到。
+                </span>
+              : <span className="text-red-700 font-medium">{' '}目前還沒有金鑰。</span>}
+          </p>
+        </div>
+      )}
+
+      {provider && (
+        <>
+          {/* 模型 */}
+          <div>
+            <label className="block text-sm text-gray-700 mb-1.5">模型</label>
+            {models.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {models.map(m => (
+                  <button key={m} type="button" disabled={busy}
+                    onClick={() => { setModel(m); void save({ llm_model: m }) }}
+                    className={`px-2 py-1 rounded-md text-xs font-mono border whitespace-nowrap
+                                transition-colors ${
+                      v?.llm_model === m
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input className={inputCls} value={model}
+                onChange={e => setModel(e.target.value)}
+                placeholder={provider === 'ollama' ? 'qwen3:8b' : 'gpt-oss'} />
+              <button type="button" disabled={busy || model === v?.llm_model}
+                onClick={() => save({ llm_model: model.trim() })}
+                className="shrink-0 px-3 py-2 rounded-lg text-sm bg-gray-900 text-white
+                           disabled:bg-gray-200 disabled:text-gray-400 whitespace-nowrap">
+                儲存
+              </button>
+            </div>
+            {modelsNote && (
+              <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">{modelsNote}</p>
+            )}
+          </div>
+
+          {/* AiHub 環境 */}
+          {provider === 'aihub' && (
+            <div>
+              <label className="block text-sm text-gray-700 mb-1.5">環境</label>
+              <div className="flex gap-2">
+                {(v?.aihub_envs || ['prod', 'stage']).map(e => (
+                  <button key={e} type="button" disabled={busy}
+                    onClick={() => save({ llm_aihub_env: e })}
+                    className={`px-3 py-1.5 rounded-lg text-sm border whitespace-nowrap ${
+                      v?.llm_aihub_env === e
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+                    {e === 'prod' ? '正式區' : '測試區'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 端點（自架 / 代理才要填）*/}
+          <div>
+            <label className="block text-sm text-gray-700 mb-1.5">
+              端點<span className="text-gray-400 text-xs
+              ">（留空用內建預設；自架 / 走代理才填）</span>
+            </label>
+            <div className="flex gap-2">
+              <input className={inputCls} value={baseUrl}
+                onChange={e => setBaseUrl(e.target.value)}
+                placeholder={provider === 'ollama' ? 'http://localhost:11434' : '（用內建預設）'} />
+              <button type="button" disabled={busy || baseUrl === v?.llm_base_url}
+                onClick={() => save({ llm_base_url: baseUrl.trim() })}
+                className="shrink-0 px-3 py-2 rounded-lg text-sm bg-gray-900 text-white
+                           disabled:bg-gray-200 disabled:text-gray-400 whitespace-nowrap">
+                儲存
+              </button>
+            </div>
+          </div>
+
+          {/* 測試連線 —— 只看設定填沒填分不出「金鑰過期」「Ollama 沒開」「模型沒 pull」 */}
+          <div className="flex items-center gap-3 pt-1">
+            <button type="button" onClick={probe} disabled={probing}
+              className="px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white
+                         hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400
+                         inline-flex items-center gap-1.5 whitespace-nowrap">
+              {probing ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                       : <Check className="w-3.5 h-3.5 shrink-0" />}
+              <span>測試連線</span>
+            </button>
+            {v && !v.available && (
+              <span className="text-xs text-amber-700 leading-relaxed">{v.reason}</span>
+            )}
+            {v?.available && (
+              <span className="text-xs text-emerald-700">設定完整，助手已可使用</span>
+            )}
           </div>
         </>
       )}

@@ -55,6 +55,17 @@ interface WorkflowStore {
   // 同時帶上 yaml 一起存，讓 TG 遠端遙控等不經過前端 getYaml() 的入口
   // 也能直接讀到對應的 YAML（不再因為 yaml 欄位空而拒絕啟動）。
   saveCanvas: (id: string, nodes: AppNode[], edges: Edge[], yaml?: string) => void
+
+  // ── AI 助手 ──
+  // 「問 AI」按鈕把當下節點的狀態摘要丟進來，助手要接著這個講。
+  // 為什麼放在 store 而不是用 props 串：按鈕在節點面板深處，
+  // 助手側欄掛在頁面最外層，中間隔了五六層元件。
+  assistantOpen: boolean
+  askAiContext: string        // 節點狀態摘要
+  askAiQuestion: string       // 打開側欄後要自動送出的第一句
+  openAssistant: (ctx?: string, question?: string) => void
+  closeAssistant: () => void
+  clearAskAiSeed: () => void  // 送出後清掉，避免重開側欄又送一次
 }
 
 // 防抖佇列：合併多次快速 saveCanvas / updateWorkflow 呼叫
@@ -133,6 +144,14 @@ export const useWorkflowStore = create<WorkflowStore>()(
         // 靜默
       }
     },
+
+    assistantOpen: false,
+    askAiContext: '',
+    askAiQuestion: '',
+    openAssistant: (ctx, question) =>
+      set({ assistantOpen: true, askAiContext: ctx ?? '', askAiQuestion: question ?? '' }),
+    closeAssistant: () => set({ assistantOpen: false }),
+    clearAskAiSeed: () => set({ askAiQuestion: '' }),
 
     setActive: (id) => set({ activeId: id }),
 
