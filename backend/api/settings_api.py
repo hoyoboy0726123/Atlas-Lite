@@ -170,6 +170,78 @@ async def probe_vlm():
     return await asyncio.get_running_loop().run_in_executor(None, vlm_cloud.probe)
 
 
+# ── LLM（AI 助手）────────────────────────────────────────────────────
+# 只有兩家：ollama（地端）與 aihub（華碩雲端閘道）。
+# ⚠ 沒有 api_key 欄位 —— AiHub 金鑰只走加密保險箱或 .env，不進 settings.json。
+
+class LlmSettingsRequest(BaseModel):
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_base_url: Optional[str] = None
+    llm_aihub_env: Optional[str] = None
+
+
+def _llm_payload() -> dict:
+    import config
+    from engine import llm as _llm
+    s = get_settings()
+    cfg = _llm._cfg()
+    cap = _llm.capability(cfg)
+    return {
+        "llm_provider": cfg["provider"],
+        "llm_model": cfg["model"],
+        "llm_base_url": s.get("llm_base_url", "") or config.LLM_BASE_URL,
+        "llm_aihub_env": cfg["aihub_env"],
+        # 金鑰只回「哪來的」，永遠不回值本身：'vault' / 'env' / ''（沒有）
+        "key_source": cfg["key_source"],
+        "available": cap["available"],
+        "reason": cap["reason"],
+        # 資料會不會離開這台機器 —— 挑模型時最該先看到的一件事
+        "data_stays_local": cap.get("data_stays_local", False),
+        "providers": ["ollama", "aihub"],
+        "aihub_allowed_models": sorted(_llm._AIHUB_ALLOWED),
+        "aihub_envs": ["prod", "stage"],
+    }
+
+
+@router.get("/settings/llm")
+async def get_llm_settings():
+    return _llm_payload()
+
+
+@router.put("/settings/llm")
+async def put_llm_settings(req: LlmSettingsRequest):
+    patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    if patch:
+        try:
+            update_settings(**patch)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return _llm_payload()
+
+
+@router.get("/settings/llm/models")
+async def list_llm_models():
+    """可選模型。Ollama 問本機拿真實清單，AiHub 回白名單（它沒有列表端點）。"""
+    import asyncio
+
+    from engine import llm as _llm
+    return await asyncio.get_running_loop().run_in_executor(None, _llm.list_models)
+
+
+@router.post("/settings/llm/probe")
+async def probe_llm():
+    """真的打一次最小請求。
+
+    只看設定填沒填是不夠的 —— 金鑰過期、Ollama 沒開、模型沒 pull
+    都只有真的送出去才知道。
+    """
+    import asyncio
+
+    from engine import llm as _llm
+    return await asyncio.get_running_loop().run_in_executor(None, _llm.probe)
+
+
 # ── Secrets Vault ────────────────────────────────────────────────────
 # 值永遠不會被回傳，也永遠不會進 log。工作流用 {{ secrets.名稱 }} 引用。
 

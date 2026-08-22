@@ -38,6 +38,16 @@ _DEFAULT = {
     "vlm_api_key": "",       # Ollama 不需要
     "vlm_base_url": "",      # 留空用內建預設；自架 / 代理才填
 
+    # ── LLM（AI 助手）──
+    # 只支援兩家：ollama（地端，資料不出本機）與 aihub（華碩雲端閘道）。
+    # 沒設 → 助手反灰，工作流執行完全不受影響。
+    "llm_provider": "",      # ollama | aihub
+    "llm_model": "",         # 例：qwen3:8b（Ollama）、gpt-oss（AiHub）
+    "llm_base_url": "",      # 留空用內建預設；自架 / 代理才填
+    "llm_aihub_env": "",     # stage 測試區 / prod 正式區（留空 = prod）
+    # ⚠ 這裡**沒有** llm_api_key。AiHub 金鑰只走 .env 或加密保險箱 ——
+    #    settings.json 是明文檔，金鑰不該落在裡面。
+
     # ── 地端 GUI 定位模型（plugins/vlm_grounding 外掛）──
     # 精度：auto（依可用顯卡記憶體自動選）/ fp16（需 ~11GB）/ int4（需 ~4.5GB）
     "grounding_precision": "auto",

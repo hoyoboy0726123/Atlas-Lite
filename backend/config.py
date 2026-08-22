@@ -46,6 +46,18 @@ def vlm_env_key(provider: str) -> str:
     """該供應商從 .env 讀得到的金鑰（沒有就回空字串）。"""
     return VLM_API_KEYS.get(provider, "") or VLM_API_KEY
 
+
+# ── LLM（AI 助手）──────────────────────────────────────────
+# 只支援兩家：ollama（地端、資料不出本機）與 aihub（華碩雲端閘道）。
+# 沒設 → 前端把助手反灰，工作流的執行完全不受影響。
+LLM_PROVIDER = os.getenv("ATLASLITE_LLM_PROVIDER", "").strip().lower()
+LLM_MODEL = os.getenv("ATLASLITE_LLM_MODEL", "").strip()
+LLM_BASE_URL = os.getenv("ATLASLITE_LLM_BASE_URL", "").strip()
+# stage（測試區）/ prod（正式區）。只影響 aihub。
+LLM_AIHUB_ENV = os.getenv("ATLASLITE_LLM_AIHUB_ENV", "prod").strip().lower()
+# ⚠ 金鑰只從 .env 或加密保險箱讀，絕不進程式碼、不進 DB 明文欄位。
+LLM_AIHUB_API_KEY = os.getenv("AIHUB_API_KEY", "").strip()
+
 # 資料目錄。Atlas 用 repo_root/ai_output/ 同時放 DB、log、工作流產物；
 # Atlas-Lite 統一收在 data/ 底下分子目錄（見下方 mkdir）。
 #   data/atlas_lite.db      主資料庫
