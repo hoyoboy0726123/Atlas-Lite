@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import OcrFieldInserter from './_ocrFieldInserter'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -48,6 +49,28 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
 
   // CV 比對設定摺疊（預設收折，避免佔太多空間）
   const [cvOpen, setCvOpen] = useState(false)
+  // ➕ 插入點:用「要插在哪個 index」表示開哪一個 popover（actions.length = 插在最後）
+  const [insertOpenAt, setInsertOpenAt] = useState<number | null>(null)
+
+  /** 在 index 位置插入一個動作。 */
+  const insertActionAt = (index: number, action: ComputerUseAction) => {
+    const next = [...(data.actions || [])]
+    next.splice(index, 0, action)
+    onUpdate({ actions: next })
+  }
+
+  // 點面板其他地方就關掉 popover（不然它會一直蓋在動作列表上）
+  useEffect(() => {
+    if (insertOpenAt === null) return
+    const onDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement
+      if (!el.closest('[data-vlm-insert-popover]') && !el.closest('[data-vlm-insert-trigger]')) {
+        setInsertOpenAt(null)
+      }
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [insertOpenAt])
   // OCR 比對設定摺疊（預設收折）
   const [ocrOpen, setOcrOpen] = useState(false)
   // VLM 把關 Phase 1 摺疊（預設收折、進階功能）
@@ -545,12 +568,26 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
               <p className="text-xs text-gray-400 text-center py-6 border border-dashed border-gray-200 rounded-lg">
                 尚未錄製任何動作
               </p>
+              <OcrFieldInserter
+                  index={0}
+                  isOpen={insertOpenAt === 0}
+                  openMenu={() => setInsertOpenAt(0)}
+                  closeMenu={() => setInsertOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
               {data.actions.map((a: ComputerUseAction, i: number) => (
                 <div key={i}>
                 {/* 動作前的 ➕ 插入點 */}
+                <OcrFieldInserter
+                  index={i}
+                  isOpen={insertOpenAt === i}
+                  openMenu={() => setInsertOpenAt(i)}
+                  closeMenu={() => setInsertOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
                 <div className="flex items-start gap-2 p-2 bg-gray-50 border border-gray-200 rounded-lg">
                   <span className="text-[10px] font-mono text-gray-400 pt-0.5">#{i + 1}</span>
                   <div className="flex-1 min-w-0">
@@ -1017,6 +1054,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                 </div>
               ))}
               {/* 列表最後的 ➕ 插入點 */}
+              <OcrFieldInserter
+                  index={data.actions.length}
+                  isOpen={insertOpenAt === data.actions.length}
+                  openMenu={() => setInsertOpenAt(data.actions.length)}
+                  closeMenu={() => setInsertOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </div>
           )}
         </div>

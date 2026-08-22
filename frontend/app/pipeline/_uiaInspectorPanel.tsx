@@ -34,6 +34,139 @@ interface PickerState {
   path: string[]   // 從 root 來的描述路徑(顯示用、不送 backend)
 }
 
+// ── 樹的可用性分析:過濾 + 判定 ──────────────────────────────
+// 為什麼需要:瀏覽器視窗裡「最小化 / 網址列 / 工具列 / 分頁」全都是 UIA 控制項。
+// 實測一個只有 13 個欄位的表單,整個視窗有 324 個節點、其中 277 個是瀏覽器外框。
+// 不過濾的話樹根本翻不完,使用者要自己用眼睛找哪個是真正的頁面欄位。
+
+/** 可互動控制項(要填值 / 要點的)。uiautomation 回的是帶 Control 字尾的名稱。 */
+// 要「點」或「填」的控制項 —— 可指名率只用這組當分母
+const _ACTIONABLE = [
+  'Edit', 'ComboBox', 'CheckBox', 'RadioButton', 'Button',
+  'List', 'ListItem', 'Spinner', 'Slider', 'Hyperlink', 'Tab', 'TabItem',
+  'MenuItem', 'DataGrid', 'Table', 'Tree', 'TreeItem',
+]
+// 只能「讀」的控制項 —— uia_get_text 的主要目標(訂單編號、狀態列、查詢結果)
+// 幾乎都是 TextControl。不列進清單的話,唯讀查詢頁會顯示成一片空白,
+// 判定還會紅字說「只能用 CV/OCR」,把使用者推去走比較不可靠的路徑。
+const _READABLE = ['Text', 'Document', 'StatusBar', 'Header', 'HeaderItem']
+const _mk = (ns: string[]) => new Set<string>(ns.flatMap(n => [n, n + 'Control']))
+const ACTIONABLE_TYPES = _mk(_ACTIONABLE)
+const INTERACTIVE = new Set<string>([..._mk(_ACTIONABLE), ..._mk(_READABLE)])
+
+/** 動作序列上的人話描述:一眼看出這步「讀什麼存到哪」或「填什麼進哪」。 */
+function describeAction(
+  type: string,
+  el: UiaElement,
+  extra: Partial<ComputerUseAction>,
+): string {
+  const target = el.name || el.type || '控制項'
+  const v = (extra as any).save_as
+  const txt = (extra as any).text
+  const keys = (extra as any).keys
+  switch (type) {
+    case 'uia_get_text':
+      return v ? `讀「${target}」→ {{${v}}}` : `讀「${target}」(沒設變數、值會被丟掉)`
+    case 'uia_get_table_rowcount':
+      return v ? `數「${target}」列數 → {{${v}}}` : `數「${target}」列數`
+    case 'uia_send_keys':
+      if (txt) return `填入「${target}」← ${txt}`
+      if (keys) return `對「${target}」按 ${Array.isArray(keys) ? keys.join('+') : keys}`
+      return `送鍵到「${target}」`
+    case 'uia_click':
+      return `點擊「${target}」`
+    case 'uia_click_cell': {
+      // row 常是 {{rows + 1}} 這種最需要核對的值,落到 default 分支就看不到了
+      const r = (extra as any).row
+      const c = (extra as any).column
+      return `點「${target}」第 ${r ?? '?'} 列第 ${c ?? '?'} 欄`
+    }
+    case 'uia_wait_enabled':
+      return `等「${target}」可用`
+    case 'uia_assert_state':
+      return `驗證「${target}」${(extra as any).check || ''}`
+    case 'uia_close_window':
+      return `關閉視窗「${target}」`
+    case 'uia_set_clipboard':
+      return `寫剪貼簿 ← ${txt || ''}`
+    default:
+      return `${type} ${el.type}${el.name ? ':' + el.name : ''}`
+  }
+}
+
+const VIEW_BTN = 'px-2.5 py-1 whitespace-nowrap shrink-0'
+const VIEW_ON = ' bg-purple-600 text-white'
+const VIEW_OFF = ' bg-white text-gray-600 hover:bg-gray-50'
+const ROW_BASE = 'flex items-baseline gap-2 px-2 py-1.5 cursor-pointer hover:bg-purple-50 leading-snug'
+
+function isInteractive(el: UiaElement): boolean {
+  return INTERACTIVE.has(el.type || '')
+}
+
+/** 走訪整棵樹。 */
+function walkTree(el: UiaElement | null | undefined, out: UiaElement[] = []): UiaElement[] {
+  if (!el) return out
+  out.push(el)
+  ;(el.children || []).forEach(c => walkTree(c, out))
+  return out
+}
+
+/**
+ * 找「網頁內容」子樹。瀏覽器把頁面塞在 DocumentControl 底下,
+ * 只分析它才有意義。取節點最多的那個 Document(避開空的隱藏分頁)。
+ */
+function findPageRoot(root: UiaElement | null | undefined): UiaElement | null {
+  if (!root) return null
+  let best: UiaElement | null = null
+  let bestSize = 0
+  for (const el of walkTree(root)) {
+    if ((el.type || '').startsWith('Document')) {
+      const size = walkTree(el).length
+      if (size > bestSize) { best = el; bestSize = size }
+    }
+  }
+  return bestSize > 3 ? best : null
+}
+
+interface TreeStats {
+  isWeb: boolean
+  totalAll: number        // 整個視窗的節點數
+  totalScoped: number     // 分析範圍內的節點數
+  interactive: number
+  withId: number
+  nameOnly: number
+  anonymous: number
+  score: number           // 0..1 可指名率
+}
+
+function analyzeTree(root: UiaElement | null | undefined, scoped: UiaElement | null | undefined): TreeStats {
+  const all = walkTree(root)
+  const nodes = walkTree(scoped || root)
+  // 計分只算「要點/要填」的 —— 唯讀 Text 沒有 auto_id 是常態,
+  // 算進分母會把可指名率壓低、誤判成「不適合 UIA」
+  const inter = nodes.filter(e => ACTIONABLE_TYPES.has(e.type || ''))
+  const withId = inter.filter(e => (e.auto_id || '').trim()).length
+  const nameOnly = inter.filter(e => !(e.auto_id || '').trim() && (e.name || '').trim()).length
+  const anonymous = inter.length - withId - nameOnly
+  // auto_id 給滿分、只有 name 給半分 —— name 是畫面文字,文案一改就失效
+  const score = inter.length ? (withId * 2 + nameOnly) / (inter.length * 2) : 0
+  return {
+    isWeb: !!scoped,
+    totalAll: all.length,
+    totalScoped: nodes.length,
+    interactive: inter.length,
+    withId, nameOnly, anonymous, score,
+  }
+}
+
+function verdictOf(s: TreeStats): { tone: 'good' | 'warn' | 'bad'; text: string } {
+  if (!s.interactive) return { tone: 'bad', text: 'UIA 看不到可操作的控制項 → 這個畫面只能用 CV / OCR' }
+  const pct = Math.round(s.score * 100)
+  if (s.score >= 0.8) return { tone: 'good', text: `很適合 UIA（可指名率 ${pct}%）→ 優先用 UIA，不受解析度與視窗位置影響` }
+  if (s.score >= 0.5) return { tone: 'warn', text: `部分可用（可指名率 ${pct}%）→ UIA 為主，抓不到的欄位退 CV / OCR` }
+  return { tone: 'bad', text: `可指名率僅 ${pct}% → UIA 幫助有限，建議以 CV / OCR 為主` }
+}
+
 export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddAction, workflowId }: Props) {
   const [tree, setTree] = useState<UiaInspectResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -52,6 +185,12 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
   // Live Picker(滑鼠 hover 桌面選元素)
   const [pickerActive, setPickerActive] = useState(false)
   const [hoveredEl, setHoveredEl] = useState<UiaElement | null>(null)
+  // 預設就聚焦頁面內容 + 只看可操作元素 —— 不過濾的話樹有 300+ 節點、翻不完
+  const [pageOnly, setPageOnly] = useState(true)
+  const [interactiveOnly, setInteractiveOnly] = useState(true)
+  // 預設走「欄位清單」:使用者想的是「找補金額那一格」,不是「第 3 層 Pane 的第 2 個」
+  const [view, setView] = useState<'list' | 'tree'>('list')
+  const [q, setQ] = useState('')
   const pickerPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pickerActiveRef = useRef(false)   // unmount cleanup 用、避免 useEffect deps=[pickerActive]
                                           // 在 state 改變時誤觸發 cleanup 把 setInterval 砍掉
@@ -60,7 +199,10 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
     setLoading(true)
     setError('')
     try {
-      const r = await uiaInspect({ window: uiaWindow, max_depth: 6, max_children_per_node: 80 })
+      // ⚠ 深度一定要夠:瀏覽器把頁面內容埋在自己的外框底下,實測 Edge 上一個平常的
+      //   表單欄位在**深度 13-14**。深度 6 抓下來全是最小化/網址列/索引標籤,
+      //   使用者要找的欄位根本不在樹裡 —— 而且畫面上看不出來,只會覺得「找不到我要的」。
+      const r = await uiaInspect({ window: uiaWindow, max_depth: 18, max_children_per_node: 200 })
       setTree(r)
       setExpanded(new Set(['']))
       setPicker(null)
@@ -165,10 +307,18 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
     const action: ComputerUseAction = {
       type,
       control,
+      // 記住這個元素是從哪個視窗挑的。backend 的優先序是 action.window > step 的
+      // uia_window > foreground,所以帶上之後,同一個節點就能跨視窗
+      //(例:從 EAP 讀值 → 填進 BPM 單)。不帶的話使用者一切換「目標視窗」,
+      // 先前挑的動作會跑去新視窗找舊欄位、全部失敗。
+      ...(uiaWindow.trim() ? { window: uiaWindow.trim() } : {}),
       // 帶上 picker 抓到的 rect、給 backend 在沒 Name/auto_id(generic Pane/GroupControl)時
       // 用 ControlFromPoint(rect 中心)當 fallback、避免 LookupError "searchProperties must not be empty"
       ...(el.rect && el.rect.length === 4 ? { rect: el.rect } : {}),
-      description: `${type} ${el.type}${el.name ? `:${el.name}` : ''}`,
+      // 描述要讓人在序列上直接核對「這步做了什麼」——
+      // 只寫 uia_get_text EditControl:營業稅額 的話,看不出存到哪個變數、也看不出填了什麼值,
+      // 使用者必須逐一點開才知道對不對。
+      description: describeAction(type, el, extra),
       ...extra,
     }
     onAddAction(action)
@@ -191,7 +341,27 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
   }, [])
 
+  /** 攤平成 (元素, path) 清單 —— path 要跟 renderNode 的算法一致,選取才對得起來。 */
+  const flatten = (
+    el: UiaElement | null | undefined,
+    path = '',
+    out: { el: UiaElement; path: string }[] = [],
+  ) => {
+    if (!el) return out
+    out.push({ el, path })
+    ;(el.children || []).forEach((c, i) => flatten(c, path ? path + '/' + i : String(i), out))
+    return out
+  }
+
+  /** 這個節點自己或後代有沒有可操作元素。用來決定「只看可操作」時要不要保留容器。 */
+  const keepNode = (el: UiaElement): boolean => {
+    if (!interactiveOnly) return true
+    if (isInteractive(el)) return true
+    return (el.children || []).some(keepNode)
+  }
+
   const renderNode = (el: UiaElement, path: string, depth: number = 0) => {
+    if (!keepNode(el)) return null
     const hasKids = el.children && el.children.length > 0
     const isOpen = expanded.has(path)
     const dimmed = !el.enabled || el.offscreen
@@ -380,18 +550,132 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
         </div>
       )}
 
-      {tree && tree.ok && (
+      {tree && tree.ok && (() => {
+        const pageRoot = findPageRoot(tree.tree)
+        const scoped = pageOnly ? pageRoot : null
+        const stats = analyzeTree(tree.tree, scoped)
+        const v = verdictOf(stats)
+        const tone = v.tone === 'good'
+          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : v.tone === 'warn'
+            ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : 'bg-rose-50 border-rose-200 text-rose-800'
+        return (
         <div className="space-y-2">
           <div className="text-[11px] text-purple-700 bg-purple-100/50 rounded px-2 py-1">
             <strong>{tree.window.name || '(foreground)'}</strong>
             {tree.window.class && <span className="ml-2 text-gray-500">[{tree.window.class}]</span>}
           </div>
-          {/* element tree */}
-          <div className="border border-gray-200 rounded-lg bg-white overflow-y-auto max-h-[40vh]">
-            {renderNode(tree.tree, '', 0)}
+
+          {/* 可用性判定 —— 按下抓取當下就知道該走 UIA 還是 CV,不用自己數 300 個節點 */}
+          <div className={`border rounded-lg px-2.5 py-2 text-[11px] ${tone}`}>
+            <div className="font-semibold leading-snug">{v.text}</div>
+            {stats.interactive > 0 && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono opacity-90 [&>span]:whitespace-nowrap">
+                <span>可操作 {stats.interactive}</span>
+                <span>auto_id {stats.withId}</span>
+                <span>僅 name {stats.nameOnly}</span>
+                {stats.anonymous > 0 && <span>匿名 {stats.anonymous}</span>}
+              </div>
+            )}
+            {pageRoot && (
+              <div className="mt-1 opacity-75">
+                偵測到網頁：視窗共 {stats.totalAll} 個節點，
+                {pageOnly
+                  ? `已排除 ${stats.totalAll - stats.totalScoped} 個瀏覽器外框（網址列 / 工具列 / 分頁）`
+                  : '含瀏覽器外框、數字會被灌水'}
+              </div>
+            )}
           </div>
+
+          {/* 檢視切換 + 搜尋 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md overflow-hidden border border-gray-300 text-[11px] shrink-0">
+              <button type="button" onClick={() => setView('list')}
+                className={VIEW_BTN + (view === 'list' ? VIEW_ON : VIEW_OFF)}>欄位清單</button>
+              <button type="button" onClick={() => setView('tree')}
+                className={VIEW_BTN + ' border-l border-gray-300' + (view === 'tree' ? VIEW_ON : VIEW_OFF)}>完整結構</button>
+            </div>
+            {view === 'list' && (
+              <input
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                placeholder="搜尋欄位名稱（例：金額）"
+                className="flex-1 min-w-[120px] text-[11px] px-2 py-1 rounded border border-gray-300 outline-none focus:border-purple-500"
+              />
+            )}
+            {pageRoot && (
+              <label className="flex items-center gap-1 cursor-pointer text-[11px] text-gray-600 whitespace-nowrap shrink-0">
+                <input type="checkbox" className="shrink-0" checked={pageOnly} onChange={e => setPageOnly(e.target.checked)} />
+                只看網頁內容
+              </label>
+            )}
+            {view === 'tree' && (
+              <label className="flex items-center gap-1 cursor-pointer text-[11px] text-gray-600 whitespace-nowrap shrink-0">
+                <input type="checkbox" className="shrink-0" checked={interactiveOnly} onChange={e => setInteractiveOnly(e.target.checked)} />
+                只看可操作
+              </label>
+            )}
+          </div>
+
+          {view === 'list' ? (() => {
+            const kw = q.trim().toLowerCase()
+            const rows = flatten(scoped || tree.tree)
+              .filter(r => isInteractive(r.el))
+              .filter(r => !kw
+                || (r.el.name || '').toLowerCase().includes(kw)
+                || (r.el.auto_id || '').toLowerCase().includes(kw)
+                || (r.el.type || '').toLowerCase().includes(kw))
+            return (
+              <div className="border border-gray-200 rounded-lg bg-white overflow-y-auto max-h-[40vh] divide-y divide-gray-100">
+                {rows.length === 0 ? (
+                  <div className="text-center text-[11px] text-gray-400 py-4">
+                    {kw ? '沒有符合的欄位' : '這個範圍內沒有可操作欄位 —— 切到「完整結構」看看'}
+                  </div>
+                ) : rows.map(({ el, path }) => {
+                  const sel = picker && picker.path.join('/') === path
+                  const hl = (ttl: number) => {
+                    const r = el.rect || [0, 0, 0, 0]
+                    if (r[2] > 0 && r[3] > 0) uiaHighlight({ x: r[0], y: r[1], width: r[2], height: r[3], ttl_ms: ttl })
+                  }
+                  return (
+                    <div
+                      key={path}
+                      onMouseEnter={() => handleHover(path, el)}
+                      onClick={() => { setPicker({ element: el, path: path.split('/') }); hl(3000) }}
+                      className={ROW_BASE + (sel ? ' bg-purple-100' : '') + (el.enabled ? '' : ' opacity-50')}
+                    >
+                      <span className="text-[12px] text-gray-800 font-medium truncate flex-1 min-w-0">
+                        {el.name || <span className="text-gray-400 italic">(沒有名稱)</span>}
+                      </span>
+                      <span className="text-[10px] font-mono text-purple-600 shrink-0">
+                        {(el.type || '').replace('Control', '')}
+                      </span>
+                      {el.auto_id
+                        ? <span className="text-[10px] font-mono text-gray-400 shrink-0">{el.auto_id}</span>
+                        : <span className="text-[10px] text-amber-600 shrink-0">無 id</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })() : (
+            <div className="border border-gray-200 rounded-lg bg-white overflow-y-auto max-h-[40vh]">
+              {renderNode(scoped || tree.tree, '', 0) || (
+                <div className="text-center text-[11px] text-gray-400 py-4">
+                  這個範圍內沒有可操作元素 —— 取消「只看可操作」看完整結構
+                </div>
+              )}
+            </div>
+          )}
+          {view === 'list' && (
+            <p className="text-[10px] text-gray-500 px-0.5">
+              滑過會在畫面上框出位置、點一下選取。找不到欄位就切「完整結構」，或取消「只看網頁內容」。
+            </p>
+          )}
         </div>
-      )}
+        )
+      })()}
 
       {!tree && !loading && !error && (
         <div className="text-center text-[11px] text-gray-500 py-3">

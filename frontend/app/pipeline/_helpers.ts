@@ -92,6 +92,16 @@ export interface ComputerUseAction {
       | 'assert_image' | 'assert_text' | 'activate_window' | 'if_image_found' | 'retry_until'
       | 'uia_click' | 'uia_send_keys' | 'uia_get_text' | 'uia_get_table_rowcount' | 'uia_click_cell'
       | 'uia_wait_enabled' | 'uia_assert_state' | 'uia_close_window' | 'uia_set_clipboard'
+      | 'ocr_get_text'
+  // ── ocr_get_text 專用：讀「標籤旁邊的值」存成變數 ──
+  label?: string        // 要找的標籤文字（例：總計金額）
+  direction?: 'right' | 'below'                // 值在標籤的哪一側
+  kind?: 'amount' | 'ident' | 'taxid' | 'any'  // 值的格式約束；taxid 會驗檢查碼
+  max_gap?: number      // 標籤與值的最大距離（px）
+  lang_tag?: string     // OCR 語言標籤，留空走預設 zh-Hant-TW
+  type_method?: string  // type_text：clipboard（預設、IME 免疫）/ keys（逐字打）
+  // save_as 沿用下方 UIA action 的同名欄位（同樣是「值存進哪個變數」）
+
   image?: string
   image2?: string        // 次錨點（多錨點驗證）
   dx2?: number           // 次錨點相對點擊點的 X 位移

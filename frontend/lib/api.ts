@@ -508,6 +508,43 @@ export interface UiaInspectResult {
 }
 
 /** 檢視指定視窗的 UIA element tree(空 window = 當前 foreground)。 */
+/** 螢幕 OCR 試抓結果。找不到時分兩種：標籤沒找到 / 標籤找到但旁邊沒有合格式的值。 */
+export interface OcrProbeResult {
+  ok: boolean
+  error?: string
+  word_count?: number
+  found?: boolean
+  value?: string
+  label_read_as?: string
+  label_score?: number
+  direction?: string
+  box?: number[]
+  label_found?: boolean
+  reason?: string
+  candidates?: string[]
+}
+
+/** 立刻對當下螢幕試抓一次，讓使用者在設定時就看到會抓到什麼。 */
+export async function ocrProbe(req: {
+  label: string
+  direction?: 'right' | 'below'
+  kind?: 'amount' | 'ident' | 'taxid' | 'any'
+  region?: number[]
+}): Promise<OcrProbeResult> {
+  const res = await fetch(`${BASE}/computer-use/ocr/probe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      label: req.label,
+      direction: req.direction ?? 'right',
+      kind: req.kind ?? 'amount',
+      ...(req.region ? { region: req.region } : {}),
+    }),
+  })
+  if (!res.ok) throw new Error(`OCR 試抓失敗（HTTP ${res.status}）`)
+  return res.json()
+}
+
 export async function uiaInspect(req: {
   window?: string
   max_depth?: number
