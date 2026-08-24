@@ -419,16 +419,19 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
                 f"（它是 {kinds[0] if kinds else '其他型別'} 節點），沒有動作序列。"
                 f"這個工具只能改 computer_use 節點。")
 
-    try:
-        ops = json.loads(ops_json)
-    except Exception as e:
-        # 模型很常送單引號或包 ``` 圍籬的「JSON」。回錯誤讓它重來要多花一輪
-        # （每輪 5-20 秒），寬鬆挖一次划算得多。
+    if isinstance(ops_json, list):
+        ops = ops_json          # 模型常直接送 JSON 陣列而不是字串 —— 收下，別浪費一輪
+    else:
         try:
-            from engine.llm import loads_loose
-            ops = loads_loose(ops_json)
-        except Exception:
-            return f"ops_json 不是合法的 JSON：{e}"
+            ops = json.loads(ops_json)
+        except Exception as e:
+            # 模型很常送單引號或包 ``` 圍籬的「JSON」。回錯誤讓它重來要多花一輪
+            # （每輪 5-20 秒），寬鬆挖一次划算得多。
+            try:
+                from engine.llm import loads_loose
+                ops = loads_loose(ops_json)
+            except Exception:
+                return f"ops_json 不是合法的 JSON：{e}"
     if not isinstance(ops, list) or not ops:
         return "ops_json 要是一個非空的 JSON 陣列"
 
@@ -498,6 +501,394 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
     return f"已寫入。{summary}"
 
 
+# ── 按需知識庫 ──────────────────────────────────────────────
+def read_help_doc(topic: str = "") -> str:
+    """讀節點設定的教學文件。**系統提示沒寫的細節先來這裡查，不要憑印象猜欄位名。**
+
+    可選 topic：
+    - script        : script 節點（batch / working_dir / output / 背景服務）
+    - project       : 接上既有 Python 專案的 SOP（venv、入口檔、bat）
+    - condition     : 條件分支（expression / on_true / switch / cases）
+    - human_confirm : 人工確認（message / Telegram / 截圖 / 超時）
+    - computer_use  : 桌面自動化節點層設定（模式 / 視窗 pattern / 三層）
+    - variables     : 變數與傳值（同節點 / 跨節點 / secrets / input）
+    - patterns      : 多節點串接的完整範例 YAML
+
+    Args:
+      topic: 上述之一。留空 = 列出清單。
+    """
+    from help_docs import get_help_doc
+    return get_help_doc(topic)
+
+
+# ── 專案分析（幫使用者接既有 Python 專案）────────────────────
+_SENSITIVE_GLOBS = (
+    ".env", ".env.*", "*.key", "*.pem", "*.p12", "*.pfx",
+    "id_rsa*", "id_ed25519*", "*.gpg", "credentials*", "*credentials*",
+    "*secret*", "*token*", ".npmrc",
+)
+
+
+def _is_sensitive_filename(name: str) -> bool:
+    import fnmatch
+    low = (name or "").lower()
+    return any(fnmatch.fnmatch(low, p) for p in _SENSITIVE_GLOBS)
+
+
+def _detect_proj_venv(proj) -> dict:
+    """偵測 venv / .venv（Windows Scripts / Unix bin）。venv 優先。"""
+    import os
+    sub = "Scripts" if os.name == "nt" else "bin"
+    py = "python.exe" if os.name == "nt" else "python"
+    for vdir in ("venv", ".venv"):
+        vpy = proj / vdir / sub / py
+        if vpy.exists():
+            return {"has_venv": True, "python_path": str(vpy.resolve()),
+                    "venv_dir_name": vdir}
+    return {"has_venv": False, "python_path": None, "venv_dir_name": None}
+
+
+def inspect_project(path: str) -> str:
+    """探查使用者的 Python 專案資料夾，為「啟動既有專案」的節點收集資訊。
+
+    使用者貼專案路徑時**第一步就呼叫**，不要憑空猜入口或依賴。回 JSON：
+    - venv：has_venv=true 時 python_path 就是該專案的 python，
+      **組 batch 時把它加引號當前綴**（例 "C:\\proj\\venv\\Scripts\\python.exe" main.py）
+    - entry_candidates：main.py / app.py / start.bat 等入口候選
+    - dependency_files / readme_files / top_level_tree（敏感檔一律隱藏）
+
+    之後用 read_project_file 讀入口檔與 README 判斷怎麼跑，再用
+    patch_step_fields 組 script 節點（batch / working_dir）。
+
+    Args:
+      path*: 專案資料夾絕對路徑
+    """
+    from pathlib import Path
+    p = (path or "").strip().strip('"').strip("'")
+    if not p:
+        return "請提供專案資料夾的絕對路徑。"
+    proj = Path(p).expanduser()
+    if not proj.exists():
+        return f"路徑不存在：{proj}。請跟使用者確認正確的絕對路徑。"
+    if proj.is_file():
+        proj = proj.parent
+    venv = _detect_proj_venv(proj)
+    entry_names = ("main.py", "app.py", "run.py", "cli.py", "__main__.py",
+                   "manage.py", "start.py", "server.py", "gui.py", "bot.py")
+    dep_names = ("requirements.txt", "pyproject.toml", "Pipfile", "Pipfile.lock",
+                 "environment.yml", "setup.py", "setup.cfg", "poetry.lock")
+    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv",
+                 ".idea", ".vscode", ".mypy_cache", ".pytest_cache",
+                 "dist", "build", ".ruff_cache"}
+    entries, deps, readmes, tree = [], [], [], []
+    try:
+        for child in sorted(proj.iterdir(), key=lambda c: (c.is_file(), c.name.lower())):
+            nm = child.name
+            if _is_sensitive_filename(nm):
+                continue
+            if child.is_dir():
+                if nm in skip_dirs:
+                    tree.append(f"{nm}/  (略)")
+                    continue
+                tree.append(f"{nm}/")
+                try:   # 第二層只列 .py 與依賴檔
+                    for g in sorted(child.iterdir()):
+                        if _is_sensitive_filename(g.name):
+                            continue
+                        if g.is_file() and (g.suffix == ".py" or g.name in dep_names):
+                            tree.append(f"  {nm}/{g.name}")
+                            if g.name in entry_names:
+                                entries.append(f"{nm}/{g.name}")
+                except Exception:
+                    pass
+            else:
+                tree.append(nm)
+                if nm in entry_names or nm.lower().endswith(".bat"):
+                    entries.append(nm)
+                if nm in dep_names:
+                    deps.append(nm)
+                if nm.lower() in ("readme.md", "readme.txt", "readme.rst", "readme"):
+                    readmes.append(nm)
+    except Exception as e:
+        return f"讀取資料夾失敗：{e}"
+    if len(tree) > 120:
+        tree = tree[:120] + [f"...(還有 {len(tree) - 120} 項略過)"]
+    result = {
+        "project_dir": str(proj.resolve()),
+        "venv": venv,
+        "entry_candidates": entries or "（頂層沒找到常見入口，請看 top_level_tree）",
+        "dependency_files": deps,
+        "readme_files": readmes,
+        "top_level_tree": tree,
+        "hint": ("有 venv → batch 用 python_path 加引號當前綴；無 venv → 用 python "
+                 "並提醒使用者依賴可能缺。⚠ 組 batch 前**必須**先 read_project_file "
+                 "讀入口檔 —— 參數格式（argparse 的 --flag 名 / 位置參數）猜錯，"
+                 "執行就直接炸，而且是使用者跑的時候才發現。"),
+    }
+    return json.dumps(result, ensure_ascii=False, indent=1)
+
+
+def read_project_file(path: str, max_chars: int = 8000) -> str:
+    """讀專案裡的某個檔（原始碼 / README / requirements / bat），判斷怎麼跑。
+
+    ⚠ .env / 金鑰 / credentials / token 等敏感檔一律拒讀。
+
+    Args:
+      path*: 檔案絕對路徑
+      max_chars=8000: 最多回傳字元（超過截斷）
+    """
+    from pathlib import Path
+    p = (path or "").strip().strip('"').strip("'")
+    if not p:
+        return "請提供檔案的絕對路徑。"
+    f = Path(p).expanduser()
+    if _is_sensitive_filename(f.name):
+        return f"⛔ 拒讀：{f.name} 屬敏感檔（.env / 金鑰 / 憑證 / token）。"
+    if not f.exists():
+        return f"檔案不存在：{f}"
+    if f.is_dir():
+        return f"{f} 是資料夾。看目錄結構請用 inspect_project。"
+    try:
+        if f.stat().st_size > 2_000_000:
+            return "檔案過大（>2MB），拒讀以免 token 爆。"
+        raw = f.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"讀檔失敗：{e}"
+    n = max(500, int(max_chars))
+    if len(raw) > n:
+        return raw[:n] + f"\n\n...（還有 {len(raw) - n} 字元被截斷）"
+    return raw or "（檔案是空的）"
+
+
+# ── 節點欄位編輯（script / condition / human_confirm 等）──────
+# patch_node_actions 只管 computer_use 的動作序列；其他節點的欄位靠這個，
+# 一樣兩步核准。跳轉目標（on_true 等）寫入前驗證存在，錯字當場擋。
+_PATCHABLE_FIELDS = {
+    # script
+    "batch": str, "working_dir": str, "timeout": int, "retry": int,
+    "background": bool, "ready_after_seconds": int, "background_keep": bool,
+    # human_confirm
+    "human_confirm": bool, "message": str, "notify_telegram": bool,
+    "screenshot": bool, "send_prev_output": bool, "hc_on_timeout": str,
+    # condition / 跳轉
+    "condition": bool, "expression": str, "on_true": str, "on_false": str,
+    "switch": str, "cases": dict, "default": str, "next": str,
+    # computer_use 節點層
+    "computer_use": bool, "cu_mode": str, "uia_window": str, "fail_fast": bool,
+    # 輸出宣告（整個 dict：{"path": ..., "json_schema": ...}）
+    "output": dict,
+}
+_JUMP_FIELDS = ("on_true", "on_false", "default", "next")
+
+
+def patch_step_fields(query: str, step_name: str, fields_json: str,
+                      confirm: bool = False) -> str:
+    """改某個步驟的欄位（script 的 batch / 分支的 expression / 人工確認的 message…）。
+
+    這是「幫使用者設定節點」的主力之一：patch_node_actions 管 computer_use 的
+    動作序列，**其他所有欄位**用這個。欄位名與格式先 read_help_doc 對應主題查。
+
+    fields_json 是 JSON 物件，例：
+      {"batch": "\"C:\\proj\\venv\\Scripts\\python.exe\" main.py", "working_dir": "C:\\proj"}
+      {"expression": "{{ steps.X.output.rows | int > 0 }}", "on_true": "下一步", "on_false": ""}
+      {"message": "金額 {{ steps.讀值.output.金額 }} 正確嗎？", "screenshot": true}
+
+    ⚠ confirm=False 只回預覽（預設）；**等使用者明確同意才 confirm=True**。
+    跳轉欄位（on_true / on_false / default / next、cases 的值）必須是存在的步驟名。
+
+    Args:
+      query*: 工作流名稱或 id
+      step_name*: 要改哪個步驟
+      fields_json*: 上述格式的 JSON 物件字串
+      confirm=False: False 預覽、True 寫入
+    """
+    import yaml as _yaml
+
+    wf, err = _resolve_workflow(query)
+    if err:
+        return err
+    raw = wf.get("yaml") or ""
+    if not raw.strip():
+        return f"「{wf['name']}」還沒有 YAML —— 先在畫布上排好節點並存檔。"
+    try:
+        spec = _yaml.safe_load(raw)
+    except Exception as e:
+        return f"現有 YAML 解析不了：{e}"
+    steps = (spec or {}).get("steps") or []
+    names = [(s.get("name") or "") for s in steps if isinstance(s, dict)]
+    target = next((s for s in steps if isinstance(s, dict)
+                   and (s.get("name") or "").strip() == step_name.strip()), None)
+    if target is None:
+        return f"找不到步驟「{step_name}」。這個工作流有：{'、'.join(n for n in names if n)}"
+
+    if isinstance(fields_json, dict):
+        fields = fields_json    # 模型常直接送 JSON 物件而不是字串 —— 收下，別浪費一輪
+    else:
+        try:
+            fields = json.loads(fields_json)
+        except Exception as e:
+            try:
+                from engine.llm import loads_loose
+                fields = loads_loose(fields_json)
+            except Exception:
+                return f"fields_json 不是合法的 JSON：{e}"
+    if not isinstance(fields, dict) or not fields:
+        return "fields_json 要是一個非空的 JSON 物件"
+
+    changes = []
+    for k, v in fields.items():
+        if k not in _PATCHABLE_FIELDS:
+            return (f"欄位「{k}」不在可改清單。可改："
+                    + "、".join(sorted(_PATCHABLE_FIELDS)))
+        want = _PATCHABLE_FIELDS[k]
+        if want in (int,) and isinstance(v, str) and v.strip().lstrip("-").isdigit():
+            v = int(v)          # 模型常把數字送成字串，能救就救
+            fields[k] = v       # ⚠ 要寫回 dict —— 只轉區域變數的話，
+                                #   下面寫入迴圈用的還是原字串（實測寫出 timeout: '600'）
+        if not isinstance(v, want) and not (want is str and v is None):
+            return f"欄位「{k}」要是 {want.__name__}，收到 {type(v).__name__}：{v!r}"
+        # 跳轉目標驗證 —— 打錯步驟名執行時才炸，這裡當場擋
+        if k in _JUMP_FIELDS and isinstance(v, str) and v.strip():
+            if v.strip() not in names:
+                return (f"「{k}」指向的步驟「{v}」不存在。"
+                        f"實際有：{'、'.join(n for n in names if n)}")
+        if k == "cases" and isinstance(v, dict):
+            bad_targets = [tv for tv in v.values()
+                           if isinstance(tv, str) and tv.strip() and tv.strip() not in names]
+            if bad_targets:
+                return (f"cases 裡指向的步驟不存在：{'、'.join(bad_targets)}。"
+                        f"實際有：{'、'.join(n for n in names if n)}")
+        old = target.get(k)
+        changes.append(f"{k}: {old!r} → {v!r}")
+
+    summary = (f"「{wf['name']}」的步驟「{step_name}」：\n"
+               + "\n".join(f"  {c}" for c in changes))
+    if not confirm:
+        return f"【預覽，尚未寫入】{summary}\n\n請使用者確認後，再用 confirm=True 呼叫一次。"
+
+    for k, v in fields.items():
+        target[k] = v
+    new_yaml = _yaml.safe_dump(spec, allow_unicode=True, sort_keys=False, width=4096)
+    bad = _validate_yaml(new_yaml)
+    if bad:
+        return f"改完的 YAML 驗不過，沒有寫入：{bad}"
+    patch = {"yaml": new_yaml}
+    cv = _regen_canvas(new_yaml)
+    if cv:
+        patch["canvas"] = cv
+    db.update_workflow(wf["id"], patch)
+    return f"已寫入。{summary}"
+
+
+def add_step(query: str, step_json: str, position: str = "",
+             confirm: bool = False) -> str:
+    """在工作流裡**新增一個步驟**（人工確認 / 條件分支 / script / computer_use 骨架）。
+
+    這是把節點「接上」的工具：patch_step_fields 只能改既有步驟，
+    要插入新的人工確認、條件分支就用這個 —— **不要**用 save_workflow_yaml 整份重寫。
+    欄位格式先 read_help_doc 對應主題查。
+
+    step_json 是一個 JSON 物件（至少要有 name），例：
+      {"name": "金額確認", "human_confirm": true,
+       "message": "金額 {{ steps.讀值.output.金額 }} 正確嗎？", "screenshot": true}
+      {"name": "檢查金額", "condition": true,
+       "expression": "{{ steps.讀值.output.金額 | int > 0 }}",
+       "on_true": "填進系統", "on_false": ""}
+
+    Args:
+      query*: 工作流名稱或 id
+      step_json*: 上述格式的 JSON 物件字串
+      position: 插在哪個既有步驟「之前」（步驟名）。留空 = 加在最後。
+      confirm=False: False 預覽、True 寫入（等使用者同意才 True）
+    """
+    import yaml as _yaml
+
+    wf, err = _resolve_workflow(query)
+    if err:
+        return err
+    raw = wf.get("yaml") or ""
+    try:
+        spec = _yaml.safe_load(raw) if raw.strip() else {"name": wf["name"], "steps": []}
+    except Exception as e:
+        return f"現有 YAML 解析不了：{e}"
+    if not isinstance(spec, dict):
+        spec = {"name": wf["name"], "steps": []}
+    steps = spec.setdefault("steps", [])
+
+    if isinstance(step_json, dict):
+        step = step_json
+    else:
+        try:
+            step = json.loads(step_json)
+        except Exception as e:
+            try:
+                from engine.llm import loads_loose
+                step = loads_loose(step_json)
+            except Exception:
+                return f"step_json 不是合法的 JSON：{e}"
+    if not isinstance(step, dict) or not (step.get("name") or "").strip():
+        return "step_json 要是一個 JSON 物件，而且必須有 name"
+
+    names = [(s.get("name") or "").strip() for s in steps if isinstance(s, dict)]
+    new_name = step["name"].strip()
+    if new_name in names:
+        # ⚠ 訊息不能叫模型「換個名字」—— 實測模型把「重試同一次新增」當成
+        #   「名字被佔用」，改名重加造成**重複步驟**（金額確認 + 金額人工確認）。
+        #   先判斷是不是「剛剛已經加過同一個東西」。
+        existing = next((s for s in steps if isinstance(s, dict)
+                         and (s.get("name") or "").strip() == new_name), None)
+        same = existing is not None and all(
+            existing.get(k) == v for k, v in step.items() if k != "name")
+        if same:
+            return (f"步驟「{new_name}」**已經存在且內容相同** —— 這就是剛剛加好的那一個，"
+                    f"任務已完成，不要換名字重加。直接告訴使用者已完成。")
+        return (f"步驟名「{new_name}」已存在但內容不同。要改它的欄位用 patch_step_fields；"
+                f"若是要加另一個不同用途的步驟才換名字。")
+
+    # 跳轉目標驗證（新步驟自己可以被別人指，但它指出去的要存在或是自己）
+    all_names = names + [new_name]
+    for k in _JUMP_FIELDS:
+        v = step.get(k)
+        if isinstance(v, str) and v.strip() and v.strip() not in all_names:
+            return (f"「{k}」指向的步驟「{v}」不存在。實際有：{'、'.join(all_names)}")
+    if isinstance(step.get("cases"), dict):
+        bad = [tv for tv in step["cases"].values()
+               if isinstance(tv, str) and tv.strip() and tv.strip() not in all_names]
+        if bad:
+            return f"cases 指向的步驟不存在：{'、'.join(bad)}"
+
+    idx = len(steps)
+    pos_desc = "最後"
+    if (position or "").strip():
+        p = position.strip()
+        if p not in names:
+            return f"position「{p}」不是既有步驟。實際有：{'、'.join(names)}"
+        idx = names.index(p)
+        pos_desc = f"「{p}」之前（第 {idx + 1} 位）"
+
+    kind = ("人工確認" if step.get("human_confirm")
+            else "條件分支" if step.get("condition")
+            else "桌面自動化" if step.get("computer_use")
+            else "腳本")
+    summary = f"在「{wf['name']}」的{pos_desc}新增步驟「{new_name}」（{kind}）"
+    if not confirm:
+        return (f"【預覽，尚未寫入】{summary}\n"
+                f"內容：{json.dumps(step, ensure_ascii=False)[:400]}\n\n"
+                f"請使用者確認後，再用 confirm=True 呼叫一次。")
+
+    steps.insert(idx, step)
+    new_yaml = _yaml.safe_dump(spec, allow_unicode=True, sort_keys=False, width=4096)
+    bad = _validate_yaml(new_yaml)
+    if bad:
+        return f"加完的 YAML 驗不過，沒有寫入：{bad}"
+    patch = {"yaml": new_yaml}
+    cv = _regen_canvas(new_yaml)
+    if cv:
+        patch["canvas"] = cv
+    db.update_workflow(wf["id"], patch)
+    return f"已寫入。{summary}"
+
+
 # ── 工具表 ──────────────────────────────────────────────────
 # (名稱, 函式, 參數簽名, 說明)。簽名給文字協議用 —— 只給參數名的話
 # 模型會漏填或填錯型別，所以標上必填 `*` 與預設值。
@@ -516,6 +907,11 @@ _reg(get_recent_runs, "query:str='', limit:int=5")
 _reg(get_run_log, "run_id*:str, max_chars:int=12000")
 _reg(save_workflow_yaml, "query*:str, yaml_content*:str, confirm:bool=False")
 _reg(patch_node_actions, "query*:str, step_name*:str, ops_json*:str, confirm:bool=False")
+_reg(patch_step_fields, "query*:str, step_name*:str, fields_json*:str, confirm:bool=False")
+_reg(add_step, "query*:str, step_json*:str, position:str='', confirm:bool=False")
+_reg(read_help_doc, "topic:str=''")
+_reg(inspect_project, "path*:str")
+_reg(read_project_file, "path*:str, max_chars:int=8000")
 
 # 會改東西的工具 —— chat_agent 用這個決定要不要在 UI 上標「這步會動到資料」
-MUTATING = {"save_workflow_yaml", "patch_node_actions"}
+MUTATING = {"save_workflow_yaml", "patch_node_actions", "patch_step_fields", "add_step"}
