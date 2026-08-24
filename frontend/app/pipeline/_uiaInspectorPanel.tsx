@@ -757,6 +757,45 @@ function UiaActionPicker({
         />
       </div>
 
+      {/* 讀文字(抓值)—— 升級成一級動作。原本摺在「進階動作」裡，
+          使用者選了「找補金額」卻只看得到點擊/等就緒，以為抓值要靠 OCR。
+          UIA 讀結構比 OCR 準：ValuePattern 直接拿 value，不受解析度/遮擋影響。 */}
+      <div className="bg-emerald-50/60 border border-emerald-200 rounded p-2 space-y-1">
+        <div className="text-[11px] font-semibold text-emerald-700">📖 讀文字存變數（抓值）</div>
+        <div className="flex gap-1 items-center">
+          <input
+            value={saveAsInput}
+            onChange={e => setSaveAsInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && saveAsInput.trim()) {
+                onAdd('uia_get_text', { save_as: saveAsInput.trim() })
+              }
+            }}
+            placeholder="變數名，例：找補金額"
+            className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+          />
+          <HelpTooltip
+            title="讀文字"
+            usage="把此控制項的文字 / value 讀出來、存進變數;優先 ValuePattern.Value、退 Name"
+            scenario="抓「找補金額」「訂單編號」等欄位值 → 下一個動作用 {{變數}} 填到別處"
+            example={'save_as="找補金額"\n→ 後續 type_text text="{{找補金額}}"、或寫剪貼簿跨應用貼'}
+          >
+            <button
+              onClick={() => {
+                if (!saveAsInput.trim()) { toast.error('請填變數名'); return }
+                onAdd('uia_get_text', { save_as: saveAsInput.trim() })
+              }}
+              className="shrink-0 whitespace-nowrap px-2 py-1 bg-emerald-600 text-white rounded text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
+            >
+              <Eye className="w-3 h-3 shrink-0" /> 讀文字
+            </button>
+          </HelpTooltip>
+        </div>
+        <div className="text-[10px] text-emerald-700/70">
+          UIA 直接讀 GUI 結構、比 OCR 準。之後用 {`{{變數名}}`} 引用；跨節點用 {`{{ steps.步驟名.output.變數名 }}`}。
+        </div>
+      </div>
+
       {/* 關閉視窗(WindowPattern.Close、true 背景操作、不必點 X 不必前景) */}
       <BigActionBtn
         icon={X}
@@ -940,7 +979,7 @@ function UiaActionPicker({
         </div>
       )}
 
-      {/* 進階區:讀文字(存變數)+ 4 種斷言 */}
+      {/* 進階區:4 種斷言（讀文字已升級成上面的一級動作卡） */}
       <div className="rounded-lg border border-gray-200 bg-gray-50/50 overflow-hidden">
         <button
           type="button"
@@ -949,35 +988,11 @@ function UiaActionPicker({
         >
           {advancedOpen ? <ChevronDown className="w-3 h-3 text-gray-400" /> : <ChevronRight className="w-3 h-3 text-gray-400" />}
           <span className="font-semibold text-gray-600 flex-1">進階動作</span>
-          <span className="text-gray-400 text-[10px]">讀文字 / 斷言狀態</span>
+          <span className="text-gray-400 text-[10px]">斷言狀態</span>
         </button>
         {advancedOpen && (
           <div className="px-2 pb-2 space-y-1.5 border-t border-gray-200">
-            <div className="pt-2 flex gap-1">
-              <input
-                value={saveAsInput}
-                onChange={e => setSaveAsInput(e.target.value)}
-                placeholder="變數名(例 user_name)"
-                className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
-              />
-              <HelpTooltip
-                title="讀文字"
-                usage="把此控制項的文字 / value 讀出來、存進變數;優先 ValuePattern.Value、退到 Name"
-                scenario="抓登入後「歡迎 王小明」、抓訂單編號「ORD-2024-0507」、抓 status bar 訊息"
-                example={'save_as="user"\n→ 後續 text="{{user}}" 引用、寫剪貼簿、傳給其他應用'}
-              >
-                <button
-                  onClick={() => {
-                    if (!saveAsInput.trim()) { toast.error('請填變數名'); return }
-                    onAdd('uia_get_text', { save_as: saveAsInput.trim() })
-                  }}
-                  className="px-2 py-1 bg-gray-700 text-white rounded text-xs flex items-center gap-1 hover:bg-gray-800 shrink-0"
-                >
-                  <Eye className="w-3 h-3" /> 讀文字
-                </button>
-              </HelpTooltip>
-            </div>
-            <div className="text-[10px] text-gray-500">把控制項顯示文字 / value 存進變數、後續用 {`{{變數}}`}</div>
+            {/* （讀文字已移到上面的一級動作卡） */}
 
             <div className="text-[10px] text-gray-600 font-semibold pt-1">斷言狀態(失敗 = 整步 fail):</div>
             <div className="grid grid-cols-2 gap-1">

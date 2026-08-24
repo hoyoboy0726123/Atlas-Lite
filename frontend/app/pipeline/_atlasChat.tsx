@@ -197,6 +197,8 @@ export default function AtlasChat() {
         {
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
           extra_context: extraCtx ?? '',
+          // 綁定的工作流 —— 後端據此組狀態摘要，助手才知道「這個工作流」是誰
+          workflow_id: activeId ?? '',
         },
         (ev) => {
           if (ev.type === 'tool_start') {

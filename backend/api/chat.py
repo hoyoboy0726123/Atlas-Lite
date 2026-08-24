@@ -36,7 +36,67 @@ class ChatRequest(BaseModel):
     # 使用者當下在編輯哪個節點 —— 「問 AI」按鈕會帶這段狀態摘要進來。
     # 助手要接著他的進度講，沒有這個就只能從頭問一遍。
     extra_context: str = ""
+    # 聊天視窗綁定的工作流。⚠ 一定要帶：不帶的話使用者說「幫我加抓值」，
+    # 助手只能反問「請問是哪一個工作流？」—— 明明聊天視窗上就寫著綁定誰。
+    workflow_id: str = ""
     temperature: float = 0.3
+
+
+def _workflow_state_block(wf_id: str) -> str:
+    """綁定工作流的狀態摘要，接進系統提示。
+
+    對齊 Atlas 的 _workflow_state_block —— 移植聊天 UI 時漏了這層，
+    實測後果：對話綁定「_runner通路驗證」，使用者說「我接下來要抓找補金額」，
+    助手呼叫 list_workflows 後反問「請問您要在哪一個工作流加步驟？」。
+    """
+    import db
+    try:
+        import yaml as _yaml
+        wf = db.get_workflow(wf_id)
+    except Exception:
+        return ""
+    if not wf:
+        return ""
+    lines = [
+        f"## 目前綁定的工作流：{wf['name']}",
+        "使用者的聊天視窗綁著這條工作流。他說「這個工作流」「幫我加」「抓某某值」",
+        "都是指它 —— 工具的 query 參數直接用上面的名稱，**不要再問他是哪一個工作流**。",
+    ]
+    steps = []
+    try:
+        spec = _yaml.safe_load(wf.get("yaml") or "") or {}
+        steps = spec.get("steps") or []
+    except Exception:
+        pass
+    if steps:
+        lines.append("步驟：")
+        for i, s in enumerate(steps, 1):
+            if not isinstance(s, dict):
+                continue
+            kind = ("桌面自動化" if s.get("computer_use")
+                    else "條件分支" if s.get("condition")
+                    else "人工確認" if s.get("human_confirm")
+                    else "腳本")
+            acts = s.get("actions") or []
+            sa = [a.get("save_as") for a in acts
+                  if isinstance(a, dict) and a.get("save_as")]
+            lines.append(f"  {i}. {s.get('name', '?')}（{kind}，{len(acts)} 個動作"
+                         + (f"，存變數：{'、'.join(sa)}" if sa else "") + "）")
+    else:
+        n = len((wf.get("canvas") or {}).get("nodes") or [])
+        lines.append(f"（還沒有 YAML；畫布上有 {n} 個節點，可能尚未存檔）")
+    return "\n".join(lines)
+
+
+def _merged_context(req: "ChatRequest") -> str:
+    parts = []
+    if req.workflow_id:
+        blk = _workflow_state_block(req.workflow_id)
+        if blk:
+            parts.append(blk)
+    if req.extra_context.strip():
+        parts.append(req.extra_context.strip())
+    return "\n\n".join(parts)
 
 
 @router.get("/pipeline/chat/status")
@@ -62,7 +122,7 @@ async def chat(req: ChatRequest):
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(
-            None, lambda: chat_agent.run(msgs, extra_context=req.extra_context,
+            None, lambda: chat_agent.run(msgs, extra_context=_merged_context(req),
                                          temperature=req.temperature))
     except llm.LlmError as e:
         # LlmError 的訊息是寫給使用者看的（缺什麼、下一步怎麼做）——
@@ -91,7 +151,7 @@ async def chat_stream(req: ChatRequest):
 
     def worker() -> None:
         try:
-            out = chat_agent.run(msgs, extra_context=req.extra_context,
+            out = chat_agent.run(msgs, extra_context=_merged_context(req),
                                  temperature=req.temperature,
                                  on_event=q.put)
             q.put({"type": "done", **out})
