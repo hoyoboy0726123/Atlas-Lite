@@ -30,7 +30,7 @@ web_crawler / mcp —— 全部依賴雲端 LLM，Atlas-Lite 不帶。
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StepOutput(BaseModel):
@@ -214,6 +214,16 @@ class PipelineStep(BaseModel):
     timeout: int = 300     # 秒
     output: Optional[StepOutput] = None
     retry: int = 1         # 自動重試次數
+
+    # 舊版前端把清空的數字欄位序列化成字面 "undefined" / 空值寫進 YAML，
+    # 使用者按執行只會看到 pydantic 的 int_parsing 天書。這幾個字串絕不可能是
+    # 使用者本意，安靜退回預設值；其他垃圾照樣報錯（誠實失敗）。
+    @field_validator("timeout", "retry", mode="before")
+    @classmethod
+    def _coerce_broken_int(cls, v, info):
+        if v is None or (isinstance(v, str) and v.strip().lower() in ("", "undefined", "null", "nan")):
+            return 300 if info.field_name == "timeout" else 1
+        return v
 
     # ── 人工確認節點 ───────────────────────────────────────────────
     human_confirm: bool = False

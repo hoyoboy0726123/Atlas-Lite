@@ -54,6 +54,16 @@ const _mk = (ns: string[]) => new Set<string>(ns.flatMap(n => [n, n + 'Control']
 const ACTIONABLE_TYPES = _mk(_ACTIONABLE)
 const INTERACTIVE = new Set<string>([..._mk(_ACTIONABLE), ..._mk(_READABLE)])
 
+/** 單層大括號的變數 typo。實測使用者打了 {總計金額}（單層）——
+ * 執行期替換只認 {{變數}}，單層會把字面字元填進欄位而且動作回報成功。
+ * 在加入動作的當下擋，比跑完才發現欄位裡有大括號好。 */
+function _singleBraceProblem(text: string): string | null {
+  // 先把合法的 {{...}} 挖掉，剩下還有 {xxx} 就是 typo
+  const rest = text.replace(/\{\{[^{}]*\}\}/g, '')
+  const m = rest.match(/\{([^{}]+)\}/)
+  return m ? m[1] : null
+}
+
 /** 動作序列上的人話描述:一眼看出這步「讀什麼存到哪」或「填什麼進哪」。 */
 function describeAction(
   type: string,
@@ -852,6 +862,11 @@ function UiaActionPicker({
               <button
                 onClick={() => {
                   if (!textInput.trim()) { toast.error('請填文字'); return }
+                  const bad = _singleBraceProblem(textInput)
+                  if (bad) {
+                    toast.error(`變數要用雙大括號 {{${bad}}} —— 單層 {${bad}} 不會被替換，會把字面字元填進欄位`)
+                    return
+                  }
                   onAdd('uia_send_keys', { text: textInput })
                   setTextInput('')
                 }}
@@ -919,6 +934,11 @@ function UiaActionPicker({
             <button
               onClick={() => {
                 if (!clipboardInput.trim()) { toast.error('請填內容'); return }
+                const bad = _singleBraceProblem(clipboardInput)
+                if (bad) {
+                  toast.error(`變數要用雙大括號 {{${bad}}} —— 單層 {${bad}} 不會被替換`)
+                  return
+                }
                 onAdd('uia_set_clipboard', { text: clipboardInput })
                 setClipboardInput('')
               }}

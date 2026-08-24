@@ -783,10 +783,10 @@ export function stepsToYaml(name: string, steps: StepData[]): string {
         }
       }
       emitOutputBlock(lines, s)
-      if (s.timeout !== 300) lines.push(`    timeout: ${s.timeout}`)
+      if (Number.isFinite(Number(s.timeout)) && Number(s.timeout) > 0 && Number(s.timeout) !== 300) lines.push(`    timeout: ${Number(s.timeout)}`)
       // computer_use 一定寫 retry(即使是 0),因為 backend PipelineStep 預設 retry=1
       // 對 UI 自動化來說 retry 從動作 #1 重跑會重複點擊造成副作用,所以預期是 retry=0
-      lines.push(`    retry: ${s.retry ?? 0}`)
+      lines.push(`    retry: ${Number(s.retry) || 0}`)
       continue
     }
     if (s.workingDir) lines.push(`    working_dir: ${s.workingDir}`)
@@ -826,9 +826,9 @@ export function stepsToYaml(name: string, steps: StepData[]): string {
         lines.push(`      json_schema: ${s.jsonSchemaText.trim().replace(/\n\s*/g, ' ')}`)
       }
     }
-    if (s.timeout !== 300) lines.push(`    timeout: ${s.timeout}`)
+    if (Number.isFinite(Number(s.timeout)) && Number(s.timeout) > 0 && Number(s.timeout) !== 300) lines.push(`    timeout: ${Number(s.timeout)}`)
     // retry 的後端 default 是 1，只要不等於 1 都得寫出來（包含使用者明確設 0）
-    if (s.retry !== 1)     lines.push(`    retry: ${s.retry}`)
+    if (String(s.retry ?? '') !== '' && Number.isFinite(Number(s.retry)) && Number(s.retry) !== 1) lines.push(`    retry: ${Number(s.retry)}`)
     // next 跳轉(condition 分支用、空字串 = 線性、不寫)
     if (s.next)            lines.push(`    next: ${s.next}`)
     // llm_role(預設 primary、不寫;只在 secondary 時寫)
