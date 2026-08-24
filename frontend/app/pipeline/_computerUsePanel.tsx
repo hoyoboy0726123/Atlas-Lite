@@ -792,7 +792,16 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                           ? `填入「${a.control?.name || a.control?.auto_id || '控制項'}」← ${a.text}`
                           : a.description
                       return dyn ? <p className="text-xs text-gray-600 mt-0.5 truncate">{dyn}</p> : null
-                    })()}                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
+                    })()}
+                    {/* 錄到注音按鍵的警告 —— 使用者打中文、錄下來卻是英數 */}
+                    {(a.type === 'type_text' || (a.type === 'uia_send_keys' && a.text)) &&
+                      looksLikeImeKeys(a.text || '') && (
+                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-relaxed">
+                        ⚠ 這串看起來是<strong>注音鍵盤的按鍵序列</strong>——錄製時你打的中文被輸入法攔走，
+                        錄到的是原始按鍵；回放會把「{(a.text || '').slice(0, 20)}」原樣貼進欄位。
+                        請按 ✎ 改成你實際要輸入的中文（回放走剪貼簿貼上、不經輸入法，直接打中文就對）。
+                      </p>
+                    )}                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
                         替身在搜尋半徑「內」的話，勾「只搜附近」完全沒用（它本來就在附近），
                         該做的是縮半徑／拉橘框；只有替身是「退回全螢幕才會撞到」的，
                         勾「只搜附近」才是正解。 */}
@@ -1412,6 +1421,18 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   )
 }
 
+
+/**
+ * 注音鍵盤按鍵序列的特徵。錄製器掛鍵盤鉤子只看得到**原始按鍵**；
+ * 使用者打中文時輸入法組字後才把字送進應用程式，錄到的是「ji3g4go6」
+ * 這種按鍵串（= ㄨㄛˇ…的鍵位）。回放會把這串英數原樣貼進欄位 —— 必錯。
+ * 特徵：全小寫英數標點、且聲調鍵(3/4/6/7)緊跟在字母後（如 i3、g4、o6）。
+ * 可能誤判含數字的英文（如 test3）—— 警告是提示不是攔截，可接受。
+ */
+function looksLikeImeKeys(s: string): boolean {
+  if (!s || !/^[a-z0-9;,./\- ]+$/.test(s)) return false
+  return /[a-z;,./][3467]/.test(s)
+}
 
 // ── 行內動作編輯器 ──────────────────────────────────────────
 // 使用者反饋：設定好的步驟原本只能刪掉重加 —— 改個變數名 / 文字 / 視窗
