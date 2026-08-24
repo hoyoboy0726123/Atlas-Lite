@@ -366,6 +366,10 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   // 行內編輯：點 ✎ 展開該動作的可改欄位（使用者反饋：設定好的步驟
   // 原本只能刪掉重加，改個變數名或文字都要重來一遍）
   const [editingAction, setEditingAction] = useState<number | null>(null)
+  // 選擇器新動作的插入位置。null = 附加在最後（預設）。
+  // 使用者反饋：中間的 ➕ 只能插 OCR 取值 —— 想在第 1 步前面加一個
+  // 「從 Inspector 重新選元素」的動作，原本只能加在最後再用 ∧ 一格格搬。
+  const [uiaInsertAt, setUiaInsertAt] = useState<number | null>(null)
 
   const applyAnchorPatch = (i: number, patch: Partial<ComputerUseAction>) => {
     const next = [...(data.actions || [])]
@@ -466,7 +470,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                 uiaWindow={data.uiaWindow || ''}
                 onUpdateWindow={(w) => onUpdate({ uiaWindow: w })}
                 onAddAction={(action) => {
-                  const next = [...(data.actions || []), action]
+                  const next = [...(data.actions || [])]
+                  if (uiaInsertAt !== null && uiaInsertAt <= next.length) {
+                    next.splice(uiaInsertAt, 0, action)
+                    setUiaInsertAt(uiaInsertAt + 1)   // 連加幾個都保持順序
+                  } else {
+                    next.push(action)
+                  }
                   onUpdate({ actions: next })
                 }}
                 workflowId={workflowId}
@@ -546,6 +556,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               動作序列（{data.actions?.length ?? 0}）
+              {uiaInsertAt !== null && (
+                <button type="button" onClick={() => setUiaInsertAt(null)}
+                  title="取消插入點、回到加在最後"
+                  className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 whitespace-nowrap">
+                  新動作插在 #{uiaInsertAt + 1} 前 ✕
+                </button>
+              )}
             </label>
             {data.actions && data.actions.length > 0 && (
               <button
@@ -597,13 +614,24 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
               {data.actions.map((a: ComputerUseAction, i: number) => (
                 <div key={i}>
                 {/* 動作前的 ➕ 插入點 */}
-                <OcrFieldInserter
-                  index={i}
-                  isOpen={insertOpenAt === i}
-                  openMenu={() => setInsertOpenAt(i)}
-                  closeMenu={() => setInsertOpenAt(null)}
-                  onAdd={insertActionAt}
-                />
+                <div className="flex items-center justify-center gap-2">
+                  <OcrFieldInserter
+                    index={i}
+                    isOpen={insertOpenAt === i}
+                    openMenu={() => setInsertOpenAt(i)}
+                    closeMenu={() => setInsertOpenAt(null)}
+                    onAdd={insertActionAt}
+                  />
+                  <button type="button"
+                    onClick={() => setUiaInsertAt(uiaInsertAt === i ? null : i)}
+                    title="把「選擇器 / 讀文字 / 填入文字」新增的動作插到這個位置（再點一次取消、回到加在最後）"
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap shrink-0 transition-colors ${
+                      uiaInsertAt === i
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'border-dashed border-gray-300 text-gray-400 hover:text-indigo-600 hover:border-indigo-300'}`}>
+                    {uiaInsertAt === i ? '⊕ 選擇器動作插入這裡' : '⊕ 插入點'}
+                  </button>
+                </div>
                 <div className="flex items-start gap-2 p-2 bg-gray-50 border border-gray-200 rounded-lg">
                   <span className="text-[10px] font-mono text-gray-400 pt-0.5">#{i + 1}</span>
                   <div className="flex-1 min-w-0">
