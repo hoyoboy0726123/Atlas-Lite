@@ -56,6 +56,11 @@ class _KeyBuffer:
             return None
         act = {
             "type": "type_text",
+            # ⚠ 錄製來的文字一定要標 keys：錄到的是**原始按鍵**（打中文時是
+            #   注音鍵位如 ji3g4go6），回放必須逐鍵敲、讓輸入法在回放時重新
+            #   組字，才會變回中文 —— 走預設的剪貼簿貼上會把按鍵串字面貼進去。
+            #   （變數/UIA 填入等程式產生的文字仍走剪貼簿 = IME 免疫，兩者不衝突）
+            "type_method": "keys",
             "text": self.text,
             "description": f'輸入 "{self.text[:20]}"' + ("…" if len(self.text) > 20 else ""),
         }

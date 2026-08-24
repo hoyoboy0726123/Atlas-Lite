@@ -793,14 +793,25 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                           : a.description
                       return dyn ? <p className="text-xs text-gray-600 mt-0.5 truncate">{dyn}</p> : null
                     })()}
-                    {/* 錄到注音按鍵的警告 —— 使用者打中文、錄下來卻是英數 */}
+                    {/* 錄到注音按鍵的提示。兩種情況訊息不同：
+                        - type_method=keys（新錄的）：回放會逐鍵敲、輸入法會重新組字 ——
+                          能動，但依賴回放時輸入法初始狀態跟錄製時一致
+                        - 沒標 keys（舊錄的 / 手填的）：走剪貼簿，按鍵串會被字面貼上，必錯 */}
                     {(a.type === 'type_text' || (a.type === 'uia_send_keys' && a.text)) &&
                       looksLikeImeKeys(a.text || '') && (
-                      <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-relaxed">
-                        ⚠ 這串看起來是<strong>注音鍵盤的按鍵序列</strong>——錄製時你打的中文被輸入法攔走，
-                        錄到的是原始按鍵；回放會把「{(a.text || '').slice(0, 20)}」原樣貼進欄位。
-                        請按 ✎ 改成你實際要輸入的中文（回放走剪貼簿貼上、不經輸入法，直接打中文就對）。
-                      </p>
+                      (a as any).type_method === 'keys' ? (
+                        <p className="text-[10px] text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-1 mt-1 leading-relaxed">
+                          ℹ 這是<strong>注音按鍵序列</strong>，回放會逐鍵敲、由輸入法重新組字成中文。
+                          前提：回放時輸入法的中英狀態要跟錄製時一致（錄到的 Shift 切換也會重放）。
+                          想完全不賭輸入法，按 ✎ 直接改成中文文字最穩。
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1 leading-relaxed">
+                          ⚠ 這串看起來是<strong>注音鍵盤的按鍵序列</strong>——錄製時你打的中文被輸入法攔走，
+                          錄到的是原始按鍵；回放會把「{(a.text || '').slice(0, 20)}」原樣貼進欄位。
+                          請按 ✎ 改成你實際要輸入的中文（回放走剪貼簿、不經輸入法，直接打中文就對）。
+                        </p>
+                      )
                     )}                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
                         替身在搜尋半徑「內」的話，勾「只搜附近」完全沒用（它本來就在附近），
                         該做的是縮半徑／拉橘框；只有替身是「退回全螢幕才會撞到」的，
