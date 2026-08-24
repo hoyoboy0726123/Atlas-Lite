@@ -405,9 +405,11 @@ def _on_click(x: int, y: int, button, pressed: bool) -> None:
             "hold_sec": hold_sec,
             "modifiers": mods,
             "description": f"{mods_desc}{btn_name} 點擊 @ {panchor.get('image')}{hold_desc}（錄製座標 {x},{y}）",
-            # 預設「純 CV」:關 UIA、開 CV、座標當最終 fallback。實測純 CV 最穩;
-            # UIA 資訊仍存在 ui 欄位,使用者想開三層自己在面板切回即可。
-            "use_uia": False,
+            # 預設「全三層」:UIA-first → CV → 座標。
+            # 舊預設是純 CV（當時 UIA-first 尚弱）；現在 UIA 深度搜尋 / GetPattern
+            # 都修好了,有身分的元素 UIA 最穩、匿名元素自動退 CV,面板也會對
+            # 「純 UIA × 匿名元素」直接警告。三層全開涵蓋兩種情況。
+            "use_uia": True,
             "use_cv": True,
             "use_coord": True,
         }

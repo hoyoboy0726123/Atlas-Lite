@@ -546,7 +546,7 @@ export type ChatEvent =
 export async function chatStream(
   // workflow_id：聊天視窗綁定的工作流。不帶的話助手不知道「這個工作流」是哪一個，
   // 會反問使用者 —— 明明綁定指示就寫在聊天視窗上。
-  req: { messages: ChatMessage[]; extra_context?: string; workflow_id?: string; temperature?: number },
+  req: { messages: ChatMessage[]; extra_context?: string; workflow_id?: string; run_id?: string; temperature?: number },
   onEvent: (ev: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

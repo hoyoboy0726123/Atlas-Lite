@@ -39,6 +39,9 @@ class ChatRequest(BaseModel):
     # 聊天視窗綁定的工作流。⚠ 一定要帶：不帶的話使用者說「幫我加抓值」，
     # 助手只能反問「請問是哪一個工作流？」—— 明明聊天視窗上就寫著綁定誰。
     workflow_id: str = ""
+    # 使用者當前檢視的執行。問「這次 log」「剛剛那次」就是指它 ——
+    # 不帶的話助手只能 get_recent_runs 猜最近的哪一筆（實測會挑錯）。
+    run_id: str = ""
     temperature: float = 0.3
 
 
@@ -94,6 +97,12 @@ def _merged_context(req: "ChatRequest") -> str:
         blk = _workflow_state_block(req.workflow_id)
         if blk:
             parts.append(blk)
+    if req.run_id:
+        parts.append(
+            f"## 使用者目前檢視的執行\n"
+            f"run_id：{req.run_id}\n"
+            f"他說「這次」「剛剛跑的」「這個 log」都是指這一次執行 —— "
+            f"直接用 get_run_log(\"{req.run_id}\") 讀，**不要**先 get_recent_runs 去猜是哪一筆。")
     if req.extra_context.strip():
         parts.append(req.extra_context.strip())
     return "\n\n".join(parts)

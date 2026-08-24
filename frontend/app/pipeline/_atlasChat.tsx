@@ -199,6 +199,8 @@ export default function AtlasChat() {
           extra_context: extraCtx ?? '',
           // 綁定的工作流 —— 後端據此組狀態摘要，助手才知道「這個工作流」是誰
           workflow_id: activeId ?? '',
+          // 使用者當前檢視的執行 —— 問「這次 log」就是指它，助手不用猜
+          run_id: useWorkflowStore.getState().currentRunId ?? '',
         },
         (ev) => {
           if (ev.type === 'tool_start') {

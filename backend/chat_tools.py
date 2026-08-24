@@ -178,14 +178,30 @@ def get_run_log(run_id: str, max_chars: int = _MAX_LOG) -> str:
     run = db.load_run((run_id or "").strip())
     if not run:
         return f"找不到 run_id={run_id}。用 get_recent_runs 看有哪些。"
-    parts = []
-    for s in (run.get("steps") or []):
-        parts.append(f"── {s.get('name','?')}　[{s.get('status','?')}]")
-        for k in ("stdout", "stderr", "error"):
-            v = (s.get(k) or "").strip()
-            if v:
-                parts.append(f"  {k}: {v}")
-    text = "\n".join(parts) or "（這次執行沒有留下任何步驟輸出）"
+    # ⚠ 優先讀完整 log 檔 —— 跟使用者畫面上「Log」抽屜同一個來源。
+    #   舊版讀 run["steps"]（**不存在的鍵**，實際結構是 step_results/stdout_tail），
+    #   永遠回「沒有步驟輸出」→ 助手看不到 log、只能長篇瞎猜可能原因
+    #   （使用者實測回報的正是這個症狀）。
+    text = ""
+    try:
+        from pathlib import Path
+        p = Path(run.get("log_path") or "")
+        if p.is_file():
+            text = p.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        log.warning(f"[chat_tools] 讀 log 檔失敗:{e}")
+    if not text:
+        parts = []
+        for s in (run.get("step_results") or []):
+            parts.append(f"── {s.get('step_name','?')}　[{s.get('validation_status','?')}]"
+                         + (f"　原因:{s.get('validation_reason')}" if s.get("validation_reason") else ""))
+            for k in ("stdout_tail", "stderr_tail", "validation_suggestion"):
+                v = (s.get(k) or "").strip()
+                if v:
+                    parts.append(f"  {k}: {v}")
+            if s.get("step_vars"):
+                parts.append(f"  變數: {s['step_vars']}")
+        text = "\n".join(parts) or "（這次執行沒有留下任何步驟輸出）"
     n = max(500, int(max_chars))
     if len(text) > n:
         # 從尾端截 —— 失敗原因幾乎都在最後，截頭會把它砍掉

@@ -388,7 +388,7 @@ export default function PipelinePage() {
   // latestRunId 鏡像 runIdRef.current 給 useEffect 依賴用 — 切完成工作流時 Trace 視圖能即時 re-fetch、
   // 不用等 3 秒 interval。ref 仍是 source of truth、所有寫入都用 setRunId helper 雙寫
   const [latestRunId, setLatestRunId] = useState<string | null>(null)
-  const setRunId = (v: string | null) => { runIdRef.current = v; setLatestRunId(v) }
+  const setRunId = (v: string | null) => { runIdRef.current = v; setLatestRunId(v) ; useWorkflowStore.getState().setCurrentRunId(v) }
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null)
   const savingRef  = useRef(false)  // 防止切換工作流時觸發 auto-save
 

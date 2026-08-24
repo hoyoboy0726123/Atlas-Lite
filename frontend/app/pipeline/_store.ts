@@ -69,6 +69,10 @@ interface WorkflowStore {
   openAssistant: (ctx?: string, question?: string) => void
   closeAssistant: () => void
   clearAskAiSeed: () => void  // 送出後清掉，避免重開側欄又送一次
+  // 使用者當前檢視/最後執行的 run —— 助手靠它知道「這次」是指哪次執行，
+  // 不用去猜最近清單裡的哪一筆
+  currentRunId: string | null
+  setCurrentRunId: (id: string | null) => void
 }
 
 // 防抖佇列：合併多次快速 saveCanvas / updateWorkflow 呼叫
@@ -199,6 +203,8 @@ export const useWorkflowStore = create<WorkflowStore>()(
     // 連 context 一起清 —— context 只該附在自動送出的那一句上，
     // 留著的話之後每句手打的訊息都會重複帶同一包節點狀態
     clearAskAiSeed: () => set({ askAiQuestion: '', askAiContext: '' }),
+    currentRunId: null,
+    setCurrentRunId: (id) => set({ currentRunId: id }),
 
     setActive: (id) => {
       // 先把上一條工作流還沒送出的修改 flush 掉，再切 —— 否則切換後的
