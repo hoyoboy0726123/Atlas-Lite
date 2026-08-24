@@ -893,7 +893,7 @@ function UiaActionPicker({
                   onAdd('uia_send_keys', { text: textInput })
                   setTextInput('')
                 }}
-                className="px-2 py-1 bg-emerald-600 text-white rounded text-xs flex items-center gap-1 hover:bg-emerald-700 shrink-0"
+                className="px-2 py-1 bg-emerald-600 text-white rounded text-xs flex items-center gap-1 hover:bg-emerald-700 shrink-0 whitespace-nowrap"
               >
                 <Type className="w-3 h-3" /> 送文字
               </button>

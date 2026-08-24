@@ -363,6 +363,10 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
       setDescribingIdx(null)
     }
   }
+  // 行內編輯：點 ✎ 展開該動作的可改欄位（使用者反饋：設定好的步驟
+  // 原本只能刪掉重加，改個變數名或文字都要重來一遍）
+  const [editingAction, setEditingAction] = useState<number | null>(null)
+
   const applyAnchorPatch = (i: number, patch: Partial<ComputerUseAction>) => {
     const next = [...(data.actions || [])]
     next[i] = { ...next[i], ...patch }
@@ -1059,6 +1063,16 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         </div>
                       )
                     })()}
+                    {/* ✎ 行內編輯：常用欄位就地改，不必刪掉重加 */}
+                    {editingAction === i && (
+                      <InlineActionEditor
+                        action={a}
+                        workflowId={workflowId}
+                        stepName={data.name}
+                        onPatch={(patch) => applyAnchorPatch(i, patch)}
+                        onClose={() => setEditingAction(null)}
+                      />
+                    )}
                   </div>
                   <div className="flex flex-col shrink-0">
                     <button onClick={() => moveAction(i, -1)} className="p-0.5 text-gray-400 hover:text-gray-700 disabled:opacity-30" disabled={i === 0}>
@@ -1068,6 +1082,11 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       <ChevronDown className="w-3 h-3" />
                     </button>
                   </div>
+                  <button onClick={() => setEditingAction(editingAction === i ? null : i)}
+                    title="編輯這個動作的欄位（文字 / 變數名 / 視窗…）"
+                    className={`shrink-0 p-0.5 rounded ${editingAction === i ? 'text-indigo-600 bg-indigo-50' : 'text-gray-300 hover:text-indigo-500'}`}>
+                    <Pencil className="w-3 h-3" />
+                  </button>
                   <button onClick={() => deleteAction(i)} className="text-gray-300 hover:text-red-500 shrink-0">
                     <Trash2 className="w-3 h-3" />
                   </button>
@@ -1337,6 +1356,86 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
           onClose={() => setEditingAnchor(null)}
         />
       )}
+    </div>
+  )
+}
+
+
+// ── 行內動作編輯器 ──────────────────────────────────────────
+// 使用者反饋：設定好的步驟原本只能刪掉重加 —— 改個變數名 / 文字 / 視窗
+// 都得重選控制項重來。這裡讓常用欄位就地改；控制項本身（挑哪個元素）
+// 還是回 Inspector 重選，那個沒辦法用打字改。
+function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: {
+  action: ComputerUseAction
+  workflowId?: string
+  stepName?: string
+  onPatch: (patch: Partial<ComputerUseAction>) => void
+  onClose: () => void
+}) {
+  const t = action.type
+  const rows: React.ReactNode[] = []
+  const input = (label: string, key: keyof ComputerUseAction, placeholder = '', mono = true) => (
+    <div key={String(key)} className="flex items-center gap-1.5">
+      <span className="text-[10px] text-gray-500 w-14 shrink-0 text-right">{label}</span>
+      <input
+        value={String((action as any)[key] ?? '')}
+        onChange={e => onPatch({ [key]: e.target.value } as any)}
+        placeholder={placeholder}
+        className={`flex-1 min-w-0 border border-indigo-200 rounded px-2 py-1 text-xs ${mono ? 'font-mono' : ''}`}
+      />
+    </div>
+  )
+
+  if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
+    rows.push(input('變數名', 'save_as', '例：總計金額'))
+    rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'uia_send_keys') {
+    rows.push(input('填入文字', 'text', '例：{{總計金額}}'))
+    rows.push(input('視窗', 'window', '例：*OCR取值測試靶*'))
+  } else if (t === 'uia_set_clipboard' || t === 'type_text') {
+    rows.push(input('文字', 'text', '可含 {{變數}}'))
+  } else if (t === 'wait') {
+    rows.push(input('秒數', 'seconds', '例：2'))
+  } else if (t === 'ocr_get_text') {
+    rows.push(input('標籤', 'label', '例：總計金額'))
+    rows.push(input('變數名', 'save_as', '例：金額'))
+    rows.push(
+      <div key="dir" className="flex items-center gap-1.5">
+        <span className="text-[10px] text-gray-500 w-14 shrink-0 text-right">方向</span>
+        <select value={action.direction || 'right'}
+          onChange={e => onPatch({ direction: e.target.value as any })}
+          className="border border-indigo-200 rounded px-1.5 py-1 text-xs">
+          <option value="right">右側</option>
+          <option value="below">下方</option>
+        </select>
+        <span className="text-[10px] text-gray-500 shrink-0">格式</span>
+        <select value={action.kind || 'amount'}
+          onChange={e => onPatch({ kind: e.target.value as any })}
+          className="border border-indigo-200 rounded px-1.5 py-1 text-xs">
+          <option value="amount">金額</option>
+          <option value="ident">單號</option>
+          <option value="taxid">統編</option>
+          <option value="any">任意</option>
+        </select>
+      </div>,
+    )
+  } else if (t === 'assert_text' || t === 'wait_image') {
+    if ('ocr_text' in action) rows.push(input('目標文字', 'ocr_text' as any, ''))
+  }
+
+  return (
+    <div className="mt-1.5 p-2 rounded-lg border border-indigo-200 bg-indigo-50/40 space-y-1.5">
+      {rows.length > 0 ? rows : (
+        <p className="text-[10px] text-gray-500">
+          這個動作沒有可打字修改的欄位 —— 要換目標控制項請刪掉後回 Inspector 重選。
+        </p>
+      )}
+      <div className="flex justify-end">
+        <button onClick={onClose}
+          className="px-2 py-0.5 rounded text-[11px] bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap">
+          完成
+        </button>
+      </div>
     </div>
   )
 }
