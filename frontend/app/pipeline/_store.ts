@@ -13,6 +13,7 @@ export interface Workflow {
   nodes: AppNode[]
   edges: Edge[]
   updatedAt: number
+  serverUpdatedAt?: number   // 伺服器版本戳（秒）—— PUT 帶上，被別處改過會 409
 }
 
 /** 遷移舊節點類型：pipelineStep → scriptStep。
@@ -34,6 +35,8 @@ function apiToWorkflow(d: WorkflowData): Workflow {
     nodes: migrateNodes((d.canvas?.nodes ?? []) as AppNode[]),
     edges: (d.canvas?.edges ?? []) as Edge[],
     updatedAt: d.updated_at * 1000,  // backend uses seconds, frontend uses ms
+    // 樂觀鎖用：只從伺服器回應更新（本地編輯會動 updatedAt，不能拿它當 base）
+    serverUpdatedAt: d.updated_at,
   }
 }
 
@@ -80,14 +83,36 @@ function _debouncedApiUpdate(id: string, patch: Record<string, any>) {
     _pendingUpdates.set(id, { timer: 0 as any, patch: { ...patch } })
   }
   const entry = _pendingUpdates.get(id)!
-  entry.timer = setTimeout(async () => {
+  entry.timer = setTimeout(() => {
     _pendingUpdates.delete(id)
-    try {
-      await updateWorkflowApi(id, entry.patch)
-    } catch {
-      // 靜默失敗 — 本地狀態已更新，下次 fetchWorkflows 會同步
-    }
+    void _sendUpdate(id, entry.patch)
   }, 500)
+}
+
+/** 實際送 PUT。帶樂觀鎖 base；被別處改過（409）就重載最新版並明講。 */
+async function _sendUpdate(id: string, patch: Record<string, any>, opts?: { keepalive?: boolean }) {
+  const st = useWorkflowStore.getState()
+  const base = st.workflows.find(w => w.id === id)?.serverUpdatedAt
+  try {
+    const fresh = await updateWorkflowApi(
+      id, base !== undefined ? { ...patch, base_updated_at: base } : patch, opts)
+    // 成功 → 版本戳前進，之後的存檔以這版為基準
+    useWorkflowStore.setState(s => ({
+      workflows: s.workflows.map(w =>
+        w.id === id ? { ...w, serverUpdatedAt: fresh.updated_at } : w),
+    }))
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('CONFLICT:')) {
+      // ⚠ 不能靜默重試：這代表 AI 助手或另一個分頁剛改過這條工作流，
+      //   硬存會把那些修改整份蓋掉（實測發生過 —— 助手改好的動作被舊分頁清空）。
+      //   放棄這次存檔、拉最新版，並明講使用者最後一次改動要重做。
+      const { toast } = await import('sonner')
+      toast.warning(e.message.slice('CONFLICT:'.length), { duration: 9000 })
+      void useWorkflowStore.getState().fetchWorkflows()
+      return
+    }
+    // 其他失敗維持原行為：本地已更新，下次 fetchWorkflows 會同步
+  }
 }
 
 /** 立刻送出所有還在防抖等待的更新。
@@ -100,7 +125,7 @@ function _flushPendingUpdates() {
     clearTimeout(entry.timer)
     _pendingUpdates.delete(id)
     // keepalive：關頁時普通 fetch 會被瀏覽器取消，keepalive 的請求會被送完
-    updateWorkflowApi(id, entry.patch, { keepalive: true }).catch(() => { /* 已盡力 */ })
+    void _sendUpdate(id, entry.patch, { keepalive: true })
   }
 }
 

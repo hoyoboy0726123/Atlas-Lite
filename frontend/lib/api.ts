@@ -941,9 +941,9 @@ export async function createWorkflowApi(name: string = '新工作流', canvas?: 
 
 export async function updateWorkflowApi(
   id: string,
-  patch: { name?: string; canvas?: any; yaml?: string },
+  patch: { name?: string; canvas?: any; yaml?: string; base_updated_at?: number },
   // keepalive：關頁前 flush 防抖時用 —— 普通 fetch 會被瀏覽器取消，
-  // keepalive 的請求會在頁面卸載後仍被送完
+  // keepalive 的請求會在頁面卸載後仍會送完
   opts?: { keepalive?: boolean },
 ): Promise<WorkflowData> {
   const res = await fetchWithRetry(`${BASE}/workflows/${id}`, {
@@ -952,6 +952,11 @@ export async function updateWorkflowApi(
     body: JSON.stringify(patch),
     ...(opts?.keepalive ? { keepalive: true } : {}),
   })
+  if (res.status === 409) {
+    // 樂觀鎖衝突：工作流被別處（AI 助手 / 其他分頁）改過了
+    const detail = await res.json().then(d => d?.detail).catch(() => '')
+    throw new Error(`CONFLICT:${detail || '工作流已被別處修改'}`)
+  }
   if (!res.ok) throw new Error('更新工作流失敗')
   return res.json()
 }

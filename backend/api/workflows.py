@@ -28,6 +28,12 @@ class WorkflowUpdateRequest(BaseModel):
     name: Optional[str] = None
     canvas: Optional[dict] = None
     yaml: Optional[str] = None
+    # 樂觀鎖：前端載入時拿到的 updated_at（秒）。
+    # ⚠ 為什麼需要：開著畫布的分頁 autosave 會用「載入當時」的舊狀態整份覆蓋 ——
+    #   AI 助手剛幫使用者改好的動作、或另一個分頁的修改，就這樣被靜默蓋掉
+    #   （實測發生了兩次）。帶了 base 的請求若 DB 已比它新 → 409，前端重載最新版。
+    #   不帶（舊前端、AI 助手內部寫入）維持原行為。
+    base_updated_at: Optional[float] = None
 
 
 @router.get("/workflows")
@@ -51,6 +57,15 @@ async def api_get_workflow(wf_id: str):
 @router.put("/workflows/{wf_id}")
 async def api_update_workflow(wf_id: str, req: WorkflowUpdateRequest):
     patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    base = patch.pop("base_updated_at", None)
+    if base is not None:
+        cur = db.get_workflow(wf_id)
+        # 0.001 秒容差：REAL 浮點來回序列化的誤差別誤判成衝突
+        if cur and cur["updated_at"] > base + 0.001:
+            raise HTTPException(
+                status_code=409,
+                detail="這個工作流剛被別處修改（AI 助手或其他分頁）。"
+                       "請重新載入最新版再改 —— 直接存檔會把那些修改蓋掉。")
     # 只帶 yaml 不帶 canvas（外部 API / Telegram 遙控更新）→ 從 yaml 重建 canvas。
     # 不重建的話 DB 留著舊 canvas，前端下次載入畫布再自動存檔，就會把新 yaml 洗回舊內容。
     if "yaml" in patch and "canvas" not in patch:
