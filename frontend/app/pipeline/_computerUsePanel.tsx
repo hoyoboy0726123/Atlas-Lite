@@ -793,6 +793,22 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                           : a.description
                       return dyn ? <p className="text-xs text-gray-600 mt-0.5 truncate">{dyn}</p> : null
                     })()}
+                    {/* 純 UIA + 匿名元素 = 必定找不到。使用者實測：全三層通過
+                        （其實是退 CV 點中的）、切純 UIA 就失敗 —— 用兩次執行才試出
+                        「這個元素 UIA 抓不到」。錄製當下就知道的事要在面板上講。 */}
+                    {(() => {
+                      const ui = (a as any).ui
+                      const uiaOnly = a.use_uia !== false && a.use_cv === false && a.use_coord === false
+                      if (!uiaOnly || !ui || ui.name || ui.auto_id) return null
+                      return (
+                        <p className="text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-1 mt-1 leading-relaxed">
+                          ⛔ 錄到的 UIA 元素是<strong>匿名的</strong>（沒有 name 也沒有 auto_id，
+                          type={ui.type || '?'}）——純 UIA 模式<strong>必定找不到</strong>，
+                          回放一定失敗。這種元素（常見於網頁繪圖區 / 捲動容器）請保留 CV 層
+                          （全三層或純 CV）；或回 Inspector 找找有沒有可指名的替代元素。
+                        </p>
+                      )
+                    })()}
                     {/* 錄到注音按鍵的提示。兩種情況訊息不同：
                         - type_method=keys（新錄的）：回放會逐鍵敲、輸入法會重新組字 ——
                           能動，但依賴回放時輸入法初始狀態跟錄製時一致
