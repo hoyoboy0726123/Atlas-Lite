@@ -61,9 +61,12 @@ _OLLAMA_TIMEOUT = 300.0
 
 # 坑 6：文件一處寫 30 天、一處寫 24 小時。取較短者再打折。
 _TOKEN_TTL = 12 * 3600
-# 坑 7：new_session 平均 1.55 秒，每題開新的等於白付 10-30% 延遲。
-_POOL_SIZE = 4
-_SESSION_MAX_USES = 200
+# ⚠ 刻意**不做** session 池。接入指引建議池化（new_session ~1.55 秒，重用省
+#   10-30% 延遲）並聲稱「prompt 自足就零污染」—— 實測不成立：
+#   同一個 session 連問兩次「我有哪些工作流？」，第二次模型**不呼叫工具**、
+#   直接把上一輪 session 歷史裡的工具結果拿來作答（回了真實的工作流清單）。
+#   後果：答案可能過期（工作流早改了），而且多使用者共用池會互看到對方的資料。
+#   每次請求都開新 session，多付 1.55 秒買正確性與隔離。
 
 
 class LlmError(RuntimeError):
@@ -167,7 +170,13 @@ def flatten_messages(messages: list[dict]) -> str:
     """多段 messages → 單一字串。
 
     AiHub 沒有 messages 概念、只吃一個 `message` 欄位，要自己攤平。
-    順序保留、system 放最前、\\n\\n 串接。
+    順序保留、system 放最前。
+
+    ⚠ **角色邊界一定要標出來。** 早期版本只用 \\n\\n 串接，實測問一句短問題
+      （「我有哪些工作流？」）時，模型會把整包當成「使用者在交代規則」，
+      回一段「了解，我會依照您提供的規則協助您…」的客套話 —— 不呼叫任何工具、
+      也沒回答問題。系統提示越長越容易發生（這裡約 2800 字，問題只有 8 字）。
+      標了邊界之後模型才知道要回應的是最後那一段。
     """
     sys_parts, rest = [], []
     for m in messages:
@@ -178,10 +187,18 @@ def flatten_messages(messages: list[dict]) -> str:
         if role == "system":
             sys_parts.append(content)
         elif role == "assistant":
-            rest.append(f"[助手先前的回覆]\n{content}")
+            rest.append(f"【你先前的回覆】\n{content}")
         else:
-            rest.append(content)
-    return "\n\n".join(sys_parts + rest)
+            rest.append(f"【使用者】\n{content}")
+    out = []
+    if sys_parts:
+        out.append("【系統規則｜以下是你要遵守的規則，不是使用者的提問，"
+                   "不要回應或複述它】\n" + "\n\n".join(sys_parts))
+    out.extend(rest)
+    if rest:
+        # 最後再點一次題。長規則 + 短提問時，只靠開頭的標記還是會被規則帶走。
+        out.append("【現在請回應上面最後一則「使用者」訊息】")
+    return "\n\n".join(out)
 
 
 # ── 寬鬆 JSON 解析（AiHub 坑 3：沒有 JSON mode）───────────────
@@ -257,7 +274,7 @@ class _AiHubState:
         self.token_at = 0.0
         self.token_key = ""       # 綁哪把 API KEY 拿的 —— 換金鑰要作廢
         self.token_base = ""      # 綁哪個環境 —— stage/prod 的 token 不通用
-        self.sessions: list[tuple[str, int]] = []   # (session_id, 已用次數)
+
 
 
 _aihub = _AiHubState()
@@ -297,30 +314,17 @@ def _aihub_token(client, base: str, api_key: str, force: bool = False) -> str:
     with _aihub.lock:
         _aihub.token, _aihub.token_at = tok, time.time()
         _aihub.token_key, _aihub.token_base = api_key, base
-        # 換 token 後舊 session 一律作廢（坑 6）
-        _aihub.sessions.clear()
     return tok
 
 
-def _aihub_session(client, base: str, token: str) -> tuple[str, int]:
-    with _aihub.lock:
-        if _aihub.sessions:
-            return _aihub.sessions.pop()
+def _aihub_session(client, base: str, token: str) -> str:
+    """永遠開新 session —— 見上面「刻意不做 session 池」的說明。"""
     r = client.post(f"{base}/new_session", headers={"Authorization": token})
     r.raise_for_status()
     sid = _json_or_raise(r, "AiHub /new_session").get("session_id") or ""
     if not sid:
         raise LlmError("AiHub /new_session 回了 200，但沒有 session_id 欄位")
-    return sid, 0
-
-
-def _aihub_return_session(sid: str, uses: int) -> None:
-    """成功才放回池。用滿次數就丟掉、下次開新的。"""
-    if uses >= _SESSION_MAX_USES:
-        return
-    with _aihub.lock:
-        if len(_aihub.sessions) < _POOL_SIZE:
-            _aihub.sessions.append((sid, uses))
+    return sid
 
 
 def _aihub_chat(cfg: dict, prompt: str, temperature: float) -> str:
@@ -341,7 +345,7 @@ def _aihub_chat(cfg: dict, prompt: str, temperature: float) -> str:
         last_err = None
         for attempt in (1, 2):
             token = _aihub_token(client, base, cfg["api_key"], force=(attempt == 2))
-            sid, uses = _aihub_session(client, base, token)
+            sid = _aihub_session(client, base, token)
             try:
                 r = client.post(f"{base}/chat",
                                 headers={"Authorization": token},
@@ -378,7 +382,6 @@ def _aihub_chat(cfg: dict, prompt: str, temperature: float) -> str:
             # 坑 8：error 可能是字串 "null"/"None"，不能直接當真值判斷
             if err and str(err).strip().lower() not in ("null", "none", ""):
                 raise LlmError(f"AiHub 回報錯誤：{err}")
-            _aihub_return_session(sid, uses + 1)
             return data.get("textResponse") or ""
         raise LlmError(f"AiHub 重新認證後仍失敗（{last_err}）")
 
