@@ -458,6 +458,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
             {/* UIA 模式:走 inspector 抓元素、選元素、加動作 */}
             {data.cuMode === 'uia' && (
               <UiaInspectorPanel
+                stepName={data.name}
                 uiaWindow={data.uiaWindow || ''}
                 onUpdateWindow={(w) => onUpdate({ uiaWindow: w })}
                 onAddAction={(action) => {

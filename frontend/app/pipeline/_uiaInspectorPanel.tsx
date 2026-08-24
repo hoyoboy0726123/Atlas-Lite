@@ -27,6 +27,22 @@ interface Props {
   onUpdateWindow: (w: string) => void
   onAddAction: (action: ComputerUseAction) => void
   workflowId?: string
+  /** 本節點的步驟名 —— 變數選單挑到「自己這步」的輸出時要轉成同節點語法 */
+  stepName?: string
+}
+
+/**
+ * 變數選單插入的是跨節點語法 {{ steps.X.output.Y }}，但如果 X 就是**本節點**，
+ * 那個語法執行時必炸：步驟還在跑、它的 output 還不存在（steps 命名空間只有
+ * 已完成的步驟）。同節點要用 {{Y}}（讀值動作 save_as 存進 step 變數、執行期替換）。
+ * 這個坑不該讓使用者記 —— 選到自己這步的輸出就自動轉。
+ */
+function _localizeVarPath(path: string, stepName?: string): string {
+  if (stepName) {
+    const m = path.match(/^steps\.(.+?)\.output\.(.+)$/)
+    if (m && m[1] === stepName) return m[2]   // {{總計金額}} 而不是 {{ steps.自己.output.總計金額 }}
+  }
+  return path
 }
 
 interface PickerState {
@@ -177,7 +193,7 @@ function verdictOf(s: TreeStats): { tone: 'good' | 'warn' | 'bad'; text: string 
   return { tone: 'bad', text: `可指名率僅 ${pct}% → UIA 幫助有限，建議以 CV / OCR 為主` }
 }
 
-export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddAction, workflowId }: Props) {
+export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddAction, workflowId, stepName }: Props) {
   const [tree, setTree] = useState<UiaInspectResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -705,7 +721,7 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
               <X className="w-3 h-3" />
             </button>
           </div>
-          <UiaActionPicker element={picker.element} onAdd={addAction} workflowId={workflowId} />
+          <UiaActionPicker element={picker.element} onAdd={addAction} workflowId={workflowId} stepName={stepName} />
         </div>
       )}
     </div>
@@ -717,10 +733,12 @@ function UiaActionPicker({
   element,
   onAdd,
   workflowId,
+  stepName,
 }: {
   element: UiaElement
   onAdd: (type: ComputerUseAction['type'], extra?: Partial<ComputerUseAction>) => void
   workflowId?: string
+  stepName?: string
 }) {
   const [textInput, setTextInput] = useState('')
   const [keysInput, setKeysInput] = useState('')
@@ -851,7 +869,12 @@ function UiaActionPicker({
             />
             <VariableButton
               workflowId={workflowId}
-              onPick={(p) => setTextInput(`${textInput}{{ ${p} }}`)}
+              onPick={(p) => {
+                const local = _localizeVarPath(p, stepName)
+                setTextInput(local === p
+                  ? `${textInput}{{ ${p} }}`
+                  : `${textInput}{{${local}}}`)   // 同節點變數：{{總計金額}}
+              }}
             />
             <HelpTooltip
               title="送文字"
@@ -923,7 +946,12 @@ function UiaActionPicker({
           />
           <VariableButton
             workflowId={workflowId}
-            onPick={(p) => setClipboardInput(`${clipboardInput}{{ ${p} }}`)}
+            onPick={(p) => {
+              const local = _localizeVarPath(p, stepName)
+              setClipboardInput(local === p
+                ? `${clipboardInput}{{ ${p} }}`
+                : `${clipboardInput}{{${local}}}`)
+            }}
           />
           <HelpTooltip
             title="寫剪貼簿"
