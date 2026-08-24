@@ -49,7 +49,8 @@ function ComputerUseNodeComponent({ data, selected }: NodeProps<ComputerUseNodeT
         </p>
         <div className="flex items-center gap-1.5 text-xs text-gray-400">
           {data.failFast && <span title="遇錯即停">⚡</span>}
-          <span>超時 {Math.floor(data.timeout / 60)}m</span>
+          {/* Number(...)||300：timeout 欄位留空時是空字串，直接除會顯示「NaNm」 */}
+          <span>超時 {Math.floor((Number(data.timeout) || 300) / 60)}m</span>
           {data.retry > 0 && <span>・重試 {data.retry}×</span>}
         </div>
       </div>

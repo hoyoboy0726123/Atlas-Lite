@@ -340,14 +340,19 @@ def execute_uia_action(action: dict, step_window: str,
                 # variable 替換
                 text = _substitute_vars(text, variables)
                 # 優先 ValuePattern.SetValue(背景 work、瞬時、不用敲鍵盤)
+                # ⚠ 不能用 ctrl.GetValuePattern()：_find_control 沒指定 type 時回的是
+                #   通用 Control 物件,**沒有這個方法** → AttributeError 被吞掉 →
+                #   永遠默默退回 SendKeys(拉前景、逐字打、輸入法可能攔截)。
+                #   通用 Control 要用 GetPattern(PatternId.ValuePattern)。
                 via_pattern = False
                 try:
-                    vp = ctrl.GetValuePattern()
-                    if vp and not vp.IsReadOnly:
+                    _pid = getattr(getattr(auto, "PatternId", None), "ValuePattern", None)
+                    vp = ctrl.GetPattern(_pid) if _pid is not None else None
+                    if vp and not getattr(vp, "IsReadOnly", True):
                         vp.SetValue(text)
                         via_pattern = True
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug(f"[uia] ValuePattern 填值失敗、退 SendKeys:{_e}")
                 if not via_pattern:
                     # fallback:模擬鍵盤打字、需要 focus(可能拉前景)
                     ctrl.SendKeys(text)
@@ -392,7 +397,7 @@ def execute_uia_action(action: dict, step_window: str,
                         text, via = str(_v), _pid_name
                         break
                 except Exception as _e:
-                    log.debug(f"[uia] {_pid_name} 取值失敗:{_e}")
+                    logger.debug(f"[uia] {_pid_name} 取值失敗:{_e}")
             if not text:
                 # 走到這代表控制項沒有 value(例:純標籤、按鈕),Name 才是它的內容。
                 # 但對輸入框而言 Name 是**標籤**不是值 —— 明講出來。

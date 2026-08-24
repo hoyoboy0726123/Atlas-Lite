@@ -939,11 +939,18 @@ export async function createWorkflowApi(name: string = '新工作流', canvas?: 
   return res.json()
 }
 
-export async function updateWorkflowApi(id: string, patch: { name?: string; canvas?: any; yaml?: string }): Promise<WorkflowData> {
+export async function updateWorkflowApi(
+  id: string,
+  patch: { name?: string; canvas?: any; yaml?: string },
+  // keepalive：關頁前 flush 防抖時用 —— 普通 fetch 會被瀏覽器取消，
+  // keepalive 的請求會在頁面卸載後仍被送完
+  opts?: { keepalive?: boolean },
+): Promise<WorkflowData> {
   const res = await fetchWithRetry(`${BASE}/workflows/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
+    ...(opts?.keepalive ? { keepalive: true } : {}),
   })
   if (!res.ok) throw new Error('更新工作流失敗')
   return res.json()

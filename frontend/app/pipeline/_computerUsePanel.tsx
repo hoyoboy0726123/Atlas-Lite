@@ -725,8 +725,17 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         </button>
                       )}
                     </div>
-                    {a.description && <p className="text-xs text-gray-600 mt-0.5 truncate">{a.description}</p>}
-                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
+                    {/* uia 取值/填值的描述改成動態組 —— description 是加入當下
+                        冷凍的字串，之後改了 save_as/text（改名、AI 修改）它不會跟著變，
+                        畫面會顯示舊變數名，跟實際執行的內容對不上。 */}
+                    {(() => {
+                      const dyn = a.type === 'uia_get_text' && a.save_as
+                        ? `讀「${a.control?.name || a.control?.auto_id || '控制項'}」→ {{${a.save_as}}}`
+                        : a.type === 'uia_send_keys' && a.text
+                          ? `填入「${a.control?.name || a.control?.auto_id || '控制項'}」← ${a.text}`
+                          : a.description
+                      return dyn ? <p className="text-xs text-gray-600 mt-0.5 truncate">{dyn}</p> : null
+                    })()}                    {/* 警告只在「執行時真的搆得到」時出現，而且建議要對症下藥：
                         替身在搜尋半徑「內」的話，勾「只搜附近」完全沒用（它本來就在附近），
                         該做的是縮半徑／拉橘框；只有替身是「退回全螢幕才會撞到」的，
                         勾「只搜附近」才是正解。 */}

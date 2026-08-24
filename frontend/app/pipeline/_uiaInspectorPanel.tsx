@@ -782,8 +782,16 @@ function UiaActionPicker({
           >
             <button
               onClick={() => {
-                if (!saveAsInput.trim()) { toast.error('請填變數名'); return }
-                onAdd('uia_get_text', { save_as: saveAsInput.trim() })
+                const v = saveAsInput.trim()
+                if (!v) { toast.error('請填變數名'); return }
+                // ⚠ 執行期的 {{變數}} 替換只認文字/數字/底線。實測有使用者把
+                //   讀到的值「40,425」當變數名 —— {{40,425}} 永遠不會被替換，
+                //   欄位裡會出現字面的大括號。當場擋下比事後查好。
+                if (!/^[\p{L}\p{N}_]+$/u.test(v)) {
+                  toast.error('變數名只能用中英文、數字、底線（這是名字，不是要讀的值）。例：找補金額')
+                  return
+                }
+                onAdd('uia_get_text', { save_as: v })
               }}
               className="shrink-0 whitespace-nowrap px-2 py-1 bg-emerald-600 text-white rounded text-xs flex items-center gap-1 hover:bg-emerald-700 transition-colors"
             >
@@ -809,10 +817,21 @@ function UiaActionPicker({
         }}
       />
 
+      {/* 選到唯讀 Text 時要指路 —— 實測使用者選了「找補金額」的 TextControl
+          （標籤），找不到填值入口，以為系統做不到。欄位清單裡同名的
+          Edit 才是輸入框。 */}
+      {!isEditable && element.type.includes('Text') && (
+        <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed">
+          ⚠ 這是唯讀文字（{element.type}），只能「讀」不能「填」。
+          要把值<strong>填進去</strong>，請回欄位清單選同名的 <span className="font-mono">Edit</span> 控制項
+          （例：找補金額 → <span className="font-mono">Edit amount</span>）。
+        </div>
+      )}
+
       {/* 輸入文字(只有 Edit/Combo/Document 可編輯類型才有意義、其他用送鍵盤) */}
       {isEditable && (
         <div className="bg-emerald-50/50 border border-emerald-200 rounded p-2 space-y-1">
-          <div className="text-[11px] font-semibold text-emerald-700">輸入文字到此控制項</div>
+          <div className="text-[11px] font-semibold text-emerald-700">⌨️ 填入文字（貼上一步的 {`{{變數}}`}）</div>
           <div className="flex gap-1 items-center">
             <input
               value={textInput}

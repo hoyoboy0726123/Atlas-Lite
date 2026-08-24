@@ -90,6 +90,26 @@ function _debouncedApiUpdate(id: string, patch: Record<string, any>) {
   }, 500)
 }
 
+/** 立刻送出所有還在防抖等待的更新。
+ *
+ * ⚠ 為什麼需要：防抖 500ms 內若發生「切換工作流 → fetchWorkflows 重抓」或
+ *   「重新整理 / dev 熱更新」，還沒送出的修改就永遠消失 —— 實測使用者
+ *   設定到一半的動作序列就是這樣不見的。切換與關頁前都要先 flush。 */
+function _flushPendingUpdates() {
+  for (const [id, entry] of _pendingUpdates) {
+    clearTimeout(entry.timer)
+    _pendingUpdates.delete(id)
+    // keepalive：關頁時普通 fetch 會被瀏覽器取消，keepalive 的請求會被送完
+    updateWorkflowApi(id, entry.patch, { keepalive: true }).catch(() => { /* 已盡力 */ })
+  }
+}
+
+// 關頁 / 重新整理 / dev 熱更新前，把還沒送出的修改送掉
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', _flushPendingUpdates)
+  window.addEventListener('beforeunload', _flushPendingUpdates)
+}
+
 export const useWorkflowStore = create<WorkflowStore>()(
   (set, get) => ({
     workflows: [],
@@ -155,7 +175,12 @@ export const useWorkflowStore = create<WorkflowStore>()(
     // 留著的話之後每句手打的訊息都會重複帶同一包節點狀態
     clearAskAiSeed: () => set({ askAiQuestion: '', askAiContext: '' }),
 
-    setActive: (id) => set({ activeId: id }),
+    setActive: (id) => {
+      // 先把上一條工作流還沒送出的修改 flush 掉，再切 —— 否則切換後的
+      // 重抓會用 DB 裡的舊資料蓋掉記憶體，半途的設定就消失了
+      _flushPendingUpdates()
+      set({ activeId: id })
+    },
 
     getActive: () => {
       const { workflows, activeId } = get()
