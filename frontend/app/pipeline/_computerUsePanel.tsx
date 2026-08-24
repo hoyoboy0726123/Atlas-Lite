@@ -279,9 +279,26 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const handleLoadRecording = async () => {
     try {
       const res = await loadComputerUseRecording(defaultAssetsDir)
-      onUpdate({ actions: res.actions || [], assetsDir: defaultAssetsDir })
-      toast.success(`已載入 ${res.actions?.length ?? 0} 個動作`)
-      runAnchorCheck(res.actions || [], defaultAssetsDir)
+      const rec = res.actions || []
+      const existing = actionsRef.current
+      const at = uiaInsertAtRef.current
+      // ⚠ 原本是整份取代（onUpdate({ actions: rec })）—— 已有 UIA 動作的節點
+      //   再去錄製，原有動作會被靜默清掉。改成合併：
+      //   沒有既有動作 → 照舊全載；有 → 插入點優先，否則接在最後。
+      let next: ComputerUseAction[]
+      if (existing.length === 0) {
+        next = rec
+      } else if (at !== null && at <= existing.length) {
+        next = [...existing.slice(0, at), ...rec, ...existing.slice(at)]
+        setUiaInsertAt(at + rec.length)   // 之後再加的東西接在錄製後面
+      } else {
+        next = [...existing, ...rec]
+      }
+      onUpdate({ actions: next, assetsDir: defaultAssetsDir })
+      toast.success(existing.length === 0
+        ? `已載入 ${rec.length} 個動作`
+        : `已${at !== null ? `插入到 #${at + 1}` : '接在最後'}：${rec.length} 個錄製動作（原有 ${existing.length} 個保留）`)
+      runAnchorCheck(next, defaultAssetsDir)
     } catch (e) {
       // 錄製尚未停好或目錄不存在是正常狀況
       console.warn('Load recording:', e)
@@ -370,6 +387,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   // 使用者反饋：中間的 ➕ 只能插 OCR 取值 —— 想在第 1 步前面加一個
   // 「從 Inspector 重新選元素」的動作，原本只能加在最後再用 ∧ 一格格搬。
   const [uiaInsertAt, setUiaInsertAt] = useState<number | null>(null)
+  // 錄製停止是輪詢 effect 裡的舊 closure 呼叫進來的（deps 只有 recording/armed），
+  // 直接讀 data.actions / uiaInsertAt 會拿到「effect 上次重跑當下」的過期值 ——
+  // 用 ref 保證合併時讀到的是最新狀態
+  const actionsRef = useRef<ComputerUseAction[]>(data.actions || [])
+  useEffect(() => { actionsRef.current = data.actions || [] }, [data.actions])
+  const uiaInsertAtRef = useRef<number | null>(null)
+  useEffect(() => { uiaInsertAtRef.current = uiaInsertAt }, [uiaInsertAt])
 
   const applyAnchorPatch = (i: number, patch: Partial<ComputerUseAction>) => {
     const next = [...(data.actions || [])]
