@@ -151,7 +151,9 @@ export const useWorkflowStore = create<WorkflowStore>()(
     openAssistant: (ctx, question) =>
       set({ assistantOpen: true, askAiContext: ctx ?? '', askAiQuestion: question ?? '' }),
     closeAssistant: () => set({ assistantOpen: false }),
-    clearAskAiSeed: () => set({ askAiQuestion: '' }),
+    // 連 context 一起清 —— context 只該附在自動送出的那一句上，
+    // 留著的話之後每句手打的訊息都會重複帶同一包節點狀態
+    clearAskAiSeed: () => set({ askAiQuestion: '', askAiContext: '' }),
 
     setActive: (id) => set({ activeId: id }),
 

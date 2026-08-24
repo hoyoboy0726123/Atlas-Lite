@@ -54,15 +54,17 @@
 
   /* Markdown table */
   .prose table {
-    @apply w-full border-collapse text-sm;
+    /* block + overflow-x：AI 助手在窄 sidebar 裡渲染表格，
+       不給水平捲動的話欄位會被壓成逐字直排（每格一個字疊很高）。 */
+    @apply block w-full max-w-full overflow-x-auto border-collapse text-sm;
   }
 
   .prose th {
-    @apply bg-gray-50 px-3 py-2 text-left font-semibold border border-gray-200;
+    @apply bg-gray-50 px-3 py-2 text-left font-semibold border border-gray-200 whitespace-nowrap;
   }
 
   .prose td {
-    @apply px-3 py-2 border border-gray-200;
+    @apply px-3 py-2 border border-gray-200 whitespace-nowrap;
   }
 
   .prose tr:nth-child(even) td {

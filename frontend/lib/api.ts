@@ -582,6 +582,57 @@ export async function chatStream(
   if (tail) { try { onEvent(JSON.parse(tail)) } catch { /* 同上 */ } }
 }
 
+// ── 每工作流的對話歷史（跟著工作流走、切流就切對話）──
+export interface WorkflowChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  ts?: number
+}
+
+export async function getWorkflowChat(workflowId: string): Promise<WorkflowChatMessage[]> {
+  const res = await fetchWithRetry(`${BASE}/workflows/${workflowId}/chat`)
+  if (!res.ok) throw new Error('讀取工作流對話失敗')
+  const data = await res.json()
+  return data.messages || []
+}
+
+export async function appendWorkflowChat(
+  workflowId: string,
+  role: 'user' | 'assistant',
+  content: string,
+): Promise<WorkflowChatMessage[]> {
+  const res = await fetchWithRetry(`${BASE}/workflows/${workflowId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, content }),
+  })
+  if (!res.ok) throw new Error('追加對話訊息失敗')
+  const data = await res.json()
+  return data.messages || []
+}
+
+export async function setWorkflowChat(
+  workflowId: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+): Promise<WorkflowChatMessage[]> {
+  // 覆寫整份（用於把 localStorage scratch 一次灌進新建立的工作流）
+  const res = await fetchWithRetry(`${BASE}/workflows/${workflowId}/chat`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+  })
+  if (!res.ok) throw new Error('覆寫對話訊息失敗')
+  const data = await res.json()
+  return data.messages || []
+}
+
+export async function clearWorkflowChat(workflowId: string): Promise<void> {
+  const res = await fetchWithRetry(`${BASE}/workflows/${workflowId}/chat`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('清空對話失敗')
+}
+
 // ── LLM 設定 ─────────────────────────────────────────────
 export interface LlmSettings {
   llm_provider: string

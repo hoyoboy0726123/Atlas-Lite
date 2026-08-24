@@ -297,7 +297,9 @@ export function VariableButton({
         type="button"
         onClick={() => setOpen(true)}
         className={
-          'inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border ' +
+          // shrink-0 + nowrap:這顆常被塞進 flex 列（旁邊是 flex-1 的輸入框），
+          // 不鎖的話面板一窄文字就被壓成直排（實測「插入變數」四個字疊兩行）
+          'inline-flex shrink-0 items-center gap-1 px-2 py-1 text-[11px] whitespace-nowrap rounded-md border ' +
           'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors ' +
           className
         }

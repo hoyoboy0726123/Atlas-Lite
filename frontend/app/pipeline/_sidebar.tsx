@@ -5,12 +5,13 @@ import {
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useWorkflowStore } from './_store'
+import AtlasChat from './_atlasChat'
 import {
   createWorkflowApi, exportWorkflowUrl, importWorkflow,
   getPipelineScheduled, getPipelineRuns, cancelPipelineSchedule,
 } from '@/lib/api'
 
-// （Atlas 的 AI 助手聊天 UI 在 Atlas-Lite 沒有 —— 工作流用畫布拉，不靠 LLM 生成。）
+// AI 助手聊天 UI 已移植（_atlasChat.tsx）。（原註解：工作流用畫布拉，不靠 LLM 生成。）
 // 本檔負責工作流列表 / 拖曳排序 / 匯入匯出 UI。
 
 // ── Countdown Hook ──────────────────────────────────────────────────────────
@@ -517,6 +518,9 @@ export default function Sidebar({ onYamlApply }: SidebarProps) {
           />
         ))}
       </div>
+
+      {/* ── AI 助手（左下角、移植自 Atlas 的 sidebar 模式）── */}
+      <AtlasChat />
     </div>
   )
 }

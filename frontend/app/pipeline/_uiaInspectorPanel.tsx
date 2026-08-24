@@ -829,7 +829,7 @@ function UiaActionPicker({
                 onAdd('uia_send_keys', { keys })
                 setKeysInput('')
               }}
-              className="px-2 py-1 bg-blue-600 text-white rounded text-xs flex items-center gap-1 hover:bg-blue-700 shrink-0"
+              className="shrink-0 whitespace-nowrap px-2 py-1 bg-blue-600 text-white rounded text-xs flex items-center gap-1 hover:bg-blue-700 shrink-0"
             >
               ⌨️ 送鍵
             </button>
@@ -864,7 +864,7 @@ function UiaActionPicker({
                 onAdd('uia_set_clipboard', { text: clipboardInput })
                 setClipboardInput('')
               }}
-              className="px-2 py-1 bg-cyan-600 text-white rounded text-xs flex items-center gap-1 hover:bg-cyan-700 shrink-0"
+              className="shrink-0 whitespace-nowrap px-2 py-1 bg-cyan-600 text-white rounded text-xs flex items-center gap-1 hover:bg-cyan-700 shrink-0"
             >
               📋 寫入
             </button>

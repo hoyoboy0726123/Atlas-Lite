@@ -76,6 +76,11 @@ def init_db():
             UNIQUE(workflow_id)
         );
     """)
+    # 欄位遷移：workflows 加 chat_messages（每個工作流一條 AI 對話歷史）。
+    # CREATE TABLE IF NOT EXISTS 不會動既有表，舊 DB 要用 ALTER 補欄位。
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(workflows)")}
+    if "chat_messages" not in cols:
+        conn.execute("ALTER TABLE workflows ADD COLUMN chat_messages TEXT NOT NULL DEFAULT '[]'")
     conn.commit()
 
 
@@ -311,3 +316,59 @@ def delete_run(run_id: str) -> bool:
     cur = conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
     conn.commit()
     return cur.rowcount > 0
+
+
+# ── 每工作流的 AI 對話歷史 ───────────────────────────────
+# 存在 workflows.chat_messages（JSON 陣列）。跟著工作流走：切工作流就切對話、
+# 刪工作流就一起消失，不需要另一張表。
+
+def get_workflow_chat(wf_id: str) -> Optional[list]:
+    """回傳對話訊息陣列；workflow 不存在回 None（跟空對話 [] 區分開）。"""
+    conn = get_conn()
+    row = conn.execute("SELECT chat_messages FROM workflows WHERE id=?", (wf_id,)).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row[0] or "[]")
+    except Exception:
+        return []
+
+
+def set_workflow_chat(wf_id: str, messages: list) -> bool:
+    """整批覆寫。workflow 不存在回 False。"""
+    conn = get_conn()
+    if not conn.execute("SELECT 1 FROM workflows WHERE id=?", (wf_id,)).fetchone():
+        return False
+    # 只收 role + content 合法的訊息 —— 前端的 streaming/toolBlocks 等
+    # ephemeral 欄位不落地
+    clean = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        if m.get("role") not in ("user", "assistant") or not isinstance(m.get("content"), str):
+            continue
+        keep = {"role": m["role"], "content": m["content"]}
+        if "ts" in m:
+            keep["ts"] = m["ts"]
+        clean.append(keep)
+    conn.execute("UPDATE workflows SET chat_messages=? WHERE id=?",
+                 (json.dumps(clean, ensure_ascii=False), wf_id))
+    conn.commit()
+    return True
+
+
+def append_workflow_chat(wf_id: str, role: str, content: str) -> Optional[list]:
+    """尾端追加一則。回新的完整陣列；workflow 不存在回 None。"""
+    if role not in ("user", "assistant"):
+        return None
+    msgs = get_workflow_chat(wf_id)
+    if msgs is None:
+        return None
+    msgs.append({"role": role, "content": content, "ts": time.time()})
+    set_workflow_chat(wf_id, msgs)
+    return msgs
+
+
+def clear_workflow_chat(wf_id: str) -> bool:
+    """清空對話（使用者按「清除對話」）。"""
+    return set_workflow_chat(wf_id, [])

@@ -268,3 +268,52 @@ async def api_workflow_variables(wf_id: str):
         "referenced": sorted(referenced),
         "last_run_id": last_run.run_id if last_run else None,
     }
+
+
+# ── 每工作流的 AI 對話歷史 ───────────────────────────────
+# 切工作流就切對話。跟 Atlas 同一套端點與行為。
+
+class ChatMessageIn(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBulkSetRequest(BaseModel):
+    messages: list[ChatMessageIn]
+
+
+@router.get("/workflows/{wf_id}/chat")
+async def get_workflow_chat_api(wf_id: str):
+    """載入指定工作流的對話歷史。"""
+    msgs = db.get_workflow_chat(wf_id)
+    if msgs is None:
+        raise HTTPException(status_code=404, detail=f"找不到工作流：{wf_id}")
+    return {"messages": msgs}
+
+
+@router.post("/workflows/{wf_id}/chat")
+async def append_workflow_chat_api(wf_id: str, msg: ChatMessageIn):
+    """追加一則訊息（user 或 assistant）。回更新後的完整陣列。"""
+    if msg.role not in ("user", "assistant"):
+        raise HTTPException(status_code=400, detail="role 必須是 'user' 或 'assistant'")
+    result = db.append_workflow_chat(wf_id, msg.role, msg.content)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"找不到工作流：{wf_id}")
+    return {"messages": result}
+
+
+@router.put("/workflows/{wf_id}/chat")
+async def set_workflow_chat_api(wf_id: str, req: ChatBulkSetRequest):
+    """整批覆寫（建新工作流時把 scratch 對話帶過去用）。"""
+    msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+    if not db.set_workflow_chat(wf_id, msgs):
+        raise HTTPException(status_code=404, detail=f"找不到工作流：{wf_id}")
+    return {"messages": db.get_workflow_chat(wf_id)}
+
+
+@router.delete("/workflows/{wf_id}/chat")
+async def clear_workflow_chat_api(wf_id: str):
+    """清空對話歷史（使用者按「清除對話」）。"""
+    if not db.clear_workflow_chat(wf_id):
+        raise HTTPException(status_code=404, detail=f"找不到工作流：{wf_id}")
+    return {"messages": []}
