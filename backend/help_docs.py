@@ -151,6 +151,20 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   ⚠ 只等 disappear 有競態:按下按鈕後遮罩還沒 render 就檢查、會誤判「已消失」。
   保險寫法是兩段:先 `until: appear`(短逾時)等它出現、再 `until: disappear` 等它消失；
   或改等結果元素 `text_contains` 關鍵字。
+- 匯出後「可能跳對話框、可能直接下載」的分歧用 `if_element_found`（UIA 版條件分支）
+  搭配 `wait_download`（等下載資料夾出現寫完的新檔案）：
+  ```yaml
+  - {type: uia_click, control: {name: "匯出/Export"}}
+  - type: if_element_found          # 「查無資料」對話框有出現嗎？
+    control: {type: Button, name: "確定"}
+    timeout_sec: 5
+    then:                            # 出現 → 按確定、繼續下一筆
+      - {type: uia_click, control: {type: Button, name: "確定"}}
+    else:                            # 沒出現 → 等下載完成
+      - {type: wait_download, pattern: "PP_Component*.xlsx", timeout_sec: 300, save_as: 下載檔}
+  ```
+  wait_download 只認「動作開始後新出現、且寫完」的檔案（排除 .crdownload 半成品、
+  大小穩定才算完成）；save_as 存完整路徑。dir 空值 = 使用者的 Downloads 資料夾。
 - 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：
   `{type: uia_select, control: {type: ComboBoxControl, auto_id: month}, text: "{{ now.month }}"}`
   背景 pattern 選取 + 回讀驗證，選項文字要一字不差（08 不是 8）。

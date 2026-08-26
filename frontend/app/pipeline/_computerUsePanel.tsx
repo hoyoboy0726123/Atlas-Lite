@@ -790,6 +790,10 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         ? `讀「${a.control?.name || a.control?.auto_id || '控制項'}」→ {{${a.save_as}}}`
                         : a.type === 'uia_select' && a.text
                         ? `選「${a.control?.name || a.control?.auto_id || '下拉'}」→ ${a.text}`
+                        : a.type === 'if_element_found'
+                        ? `若「${a.control?.name || a.control?.auto_id || '元素'}」出現 → ${(a.then || []).length} 個子動作，否則 ${(a.else || []).length} 個`
+                        : a.type === 'wait_download'
+                        ? `等下載完成：${a.pattern || '*'}${a.save_as ? ` → {{${a.save_as}}}` : ''}`
                         : a.type === 'uia_wait'
                         ? `等「${a.control?.name || a.control?.auto_id || '目標'}」${a.until === 'disappear' ? '消失' : a.until === 'text_contains' ? `文字含「${a.text || ''}」` : a.until === 'text_equals' ? `文字=「${a.text || ''}」` : '出現'}`
                         : a.type === 'uia_send_keys' && a.text
@@ -1493,6 +1497,14 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'if_element_found') {
+    rows.push(input('探測秒數', 'timeout_sec', '3'))
+    rows.push(input('視窗', 'window', '例：*SCM Portal*'))
+  } else if (t === 'wait_download') {
+    rows.push(input('檔名樣式', 'pattern', '例：PP_Component*.xlsx'))
+    rows.push(input('資料夾(空=Downloads)', 'dir', ''))
+    rows.push(input('逾時秒數', 'timeout_sec', '300'))
+    rows.push(input('存路徑到變數', 'save_as', '例：下載檔'))
   } else if (t === 'uia_wait') {
     rows.push(input('條件(until)', 'until', 'appear / disappear / text_contains / text_equals'))
     rows.push(input('關鍵字(text_*用)', 'text', '例：已匯出'))

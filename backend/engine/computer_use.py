@@ -836,6 +836,7 @@ def execute_action(
     cv_coord_fallback: bool = False,
     ocr_threshold: float = 0.6,
     ocr_cv_fallback: bool = False,
+    uia_window: str = "",
     step_variables: "Optional[dict]" = None,
     _depth: int = 0,
 ) -> ActionResult:
@@ -870,10 +871,21 @@ def execute_action(
         "cv_coord_fallback": cv_coord_fallback,
         "ocr_threshold": ocr_threshold,
         "ocr_cv_fallback": ocr_cv_fallback,
+        "uia_window": uia_window,
         "step_variables": step_variables,   # 巢狀子動作也要能用 {{變數}}
     }
 
     try:
+        # uia_* 在這裡也要路由:最外層迴圈有自己的路由,但 if_image_found /
+        # if_element_found / retry_until 的巢狀子動作走的是本函式 ——
+        # 沒這段,巢狀裡的 uia 子動作會掉到「不認得的 action type」。
+        if atype.startswith("uia_"):
+            from .uia_executor import execute_uia_action
+            uia_res = execute_uia_action(action, action.get("window") or uia_window,
+                                         step_variables, logger)
+            return ActionResult(uia_res.ok, index, atype, uia_res.message,
+                                duration_ms=int((time.time() - t0) * 1000),
+                                saved_var=uia_res.saved_var)
         pg = _pyautogui_with_failsafe()
 
         if atype == "click_image":
@@ -2022,6 +2034,91 @@ def execute_action(
             msg = (f"if {img_name}: {'match' if found else 'no-match'} "
                    f"→ 執行 {branch_label}（{len(branch)} 個子動作皆 OK）")
 
+        elif atype == "if_element_found":
+            # UIA 版條件分支:目標元素在畫面上 → then[]、不在 → else[]。
+            # 典型:按匯出後「查無資料」對話框跳出來就按確定,否則等下載完成。
+            # 與 if_image_found 同框架,但比對 UIA 結構 —— 不用截錨點圖、漂移免疫。
+            cdef = action.get("control") or {}
+            if not cdef:
+                return ActionResult(False, index, atype, "if_element_found 缺 control 欄位")
+            timeout = float(action.get("timeout_sec", 3.0))
+            from .uia_executor import element_exists
+            found = element_exists(action.get("window") or uia_window, cdef,
+                                   rect=action.get("rect"), timeout=timeout)
+            branch = action.get("then", []) if found else action.get("else", [])
+            branch = branch or []
+            branch_label = "then" if found else "else"
+            logger.info(f"[computer_use] {indent}  → 元素 {cdef} "
+                        f"{'在' if found else '不在'} → 走 {branch_label} 分支"
+                        f"（{len(branch)} 個子動作）")
+            for sub_i, sub_action in enumerate(branch):
+                if not isinstance(sub_action, dict):
+                    return ActionResult(False, index, atype,
+                        f"{branch_label}[{sub_i}] 不是 dict，YAML 格式錯誤")
+                sub_res = execute_action(
+                    sub_action, assets_dir, sub_i, logger, run_id,
+                    _depth=_depth + 1, **_exec_ctx,
+                )
+                if getattr(sub_res, "saved_var", None):
+                    step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
+                if not sub_res.ok:
+                    return ActionResult(False, index, atype,
+                        f"if_element_found/{branch_label}[{sub_i+1}] "
+                        f"({sub_res.action_type}) 失敗：{sub_res.message}")
+            msg = (f"if 元素{'在' if found else '不在'} → 執行 {branch_label}"
+                   f"（{len(branch)} 個子動作皆 OK）")
+
+        elif atype == "wait_download":
+            # 等瀏覽器下載完成:資料夾出現「新的、寫完的」檔案。
+            # 完成的判斷:檔名對上 pattern、不是 .crdownload/.tmp/.partial 半成品、
+            # 沒有同名半成品還在寫、且大小連續兩次輪詢沒變(還在長大 = 還在寫)。
+            # save_as 存完整路徑,後續步驟可拿去搬檔/開檔/寄信。
+            import glob as _glob
+            from .uia_executor import _substitute_vars as _sub
+            dl_dir = _sub(action.get("dir") or "", step_variables) or str(Path.home() / "Downloads")
+            pattern = _sub(action.get("pattern") or "*", step_variables)
+            timeout = float(action.get("timeout_sec", 300))
+            if not Path(dl_dir).is_dir():
+                return ActionResult(False, index, atype, f"下載資料夾不存在:{dl_dir}")
+            t_begin = time.time()
+            # 「新檔案」= 步驟開始之後出現的(mtime 判斷)。不能用本動作開始時間當
+            # 基準:下載在「按匯出」當下就開始,等對話框探測完輪到本動作時,檔案
+            # 可能已經寫完 —— 會被誤判成「本來就在」而空等到超時(實測踩過)。
+            step_t0 = float(step_variables.get("__cu_step_t0__") or (t_begin - 30))
+            claimed = step_variables.setdefault("__cu_downloads_claimed__", [])
+            last_size: dict = {}
+            while time.time() - t_begin < timeout:
+                _check_abort(run_id)
+                def _fresh(p):
+                    try:
+                        return Path(p).stat().st_mtime >= step_t0 - 2
+                    except OSError:
+                        return False
+                cands = [p for p in _glob.glob(str(Path(dl_dir) / pattern))
+                         if p not in claimed
+                         and not p.endswith((".crdownload", ".tmp", ".partial"))
+                         and _fresh(p)]
+                if cands:
+                    newest = max(cands, key=lambda p: Path(p).stat().st_mtime)
+                    still_writing = Path(newest + ".crdownload").exists()
+                    try:
+                        sz = Path(newest).stat().st_size
+                    except OSError:
+                        sz = -1
+                    if not still_writing and sz >= 0 and last_size.get(newest) == sz:
+                        claimed.append(newest)   # 同步驟第二個 wait_download 不會重複認領
+                        elapsed = time.time() - t_begin
+                        save_as = (action.get("save_as") or "").strip()
+                        _msg = f"下載完成:{Path(newest).name}({sz} bytes、等了 {elapsed:.1f}s)"
+                        return ActionResult(True, index, atype, _msg,
+                                            duration_ms=int((time.time() - t0) * 1000),
+                                            saved_var=(save_as, newest) if save_as else None)
+                    last_size[newest] = sz
+                time.sleep(0.6)
+            return ActionResult(False, index, atype,
+                f"等了 {timeout:.0f}s 沒有符合「{pattern}」的新檔案下載完成"
+                f"(資料夾:{dl_dir})。下載比預期久的話調大 timeout_sec")
+
         elif atype == "retry_until":
             # 重複動作直到條件滿足：按鈕沒反應再按一次、網路抖動後重試
             # do[]  = 每輪要執行的動作清單
@@ -2304,6 +2401,10 @@ def execute_computer_use_step(
     # 跨 action 變數儲存(uia_get_text / uia_get_table_rowcount 用 save_as 存的)
     # 後續 action 內 {{var_name}} 替換靠這個
     step_variables: dict[str, Any] = {}
+    # wait_download 的「新檔案」基準:下載在「按匯出」當下就開始,但 wait_download
+    # 常排在對話框探測之後才輪到 —— 以動作自身的開始時間當基準會把已落地的檔案
+    # 誤判成「本來就在」。所以基準用整個步驟的開始時間。
+    step_variables["__cu_step_t0__"] = time.time()
 
     # （Atlas 的「動作後 VLM 把關」在此已移除 —— 它要把前後截圖送雲端 VLM 比對
     #   action.expected。預設 strategy 本來就是 off，移除不改變任何既有行為。
@@ -2361,6 +2462,7 @@ def execute_computer_use_step(
                                  cv_coord_fallback=cv_coord_fallback,
                                  ocr_threshold=ocr_threshold,
                                  ocr_cv_fallback=ocr_cv_fallback,
+                                 uia_window=uia_window,
                                  step_variables=step_variables)
         except RuntimeError as abort_err:
             logger.warning(f"[computer_use] {abort_err}")

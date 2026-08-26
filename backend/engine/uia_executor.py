@@ -150,6 +150,39 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
     return getattr(parent, method_name)(**kwargs)
 
 
+def element_exists(window_pattern: str, control_def: dict,
+                   rect: Optional[list] = None, timeout: float = 3.0) -> bool:
+    """探測「元素現在在不在畫面上」(if_element_found 條件分支用)。
+
+    找不到不是錯誤、就是 False —— 跟 uia_wait 不同,這裡的「不在」是合法分支。
+    """
+    try:
+        auto = _get_auto()
+    except ImportError:
+        return False
+    try:
+        win = _resolve_window(auto, {}, window_pattern)
+        if not win.Exists(1, 0.3):
+            return False
+        deadline = time.time() + max(0.5, timeout)
+        while True:
+            try:
+                ctrl = _find_control(auto, win, control_def, fallback_rect=rect)
+                if ctrl is not None and ctrl.Exists(0.5, 0.2):
+                    return True
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                return False
+            try:
+                win.GetChildren()   # Edge 冷樹敲醒(同 uia_wait 的作法)
+            except Exception:
+                pass
+            time.sleep(0.3)
+    except Exception:
+        return False
+
+
 # ── inspect:回傳 element tree(給 frontend tree picker 用)──────────────
 def inspect_window(window_pattern: str = "", max_depth: int = 6,
                    max_children_per_node: int = 50,
