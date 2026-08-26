@@ -1986,6 +1986,78 @@ def execute_action(
             msg = (f"assert 通過：文字 '{text}' 可見 @ {found_ocr.center} "
                    f"(matched='{found_ocr.text[:30]}', conf={found_ocr.confidence:.2f})")
 
+        elif atype == "for_each":
+            # 清單逐筆迴圈:每輪把當前項存進 save_as 變數、跑一遍 do[] 子動作。
+            # 典型:5 個品規逐筆「填值→匯出→等查詢→分歧」,不用手動改五次。
+            # items 支援:YAML 清單、逗號/換行分隔字串、{{變數}}(含從畫面讀下來的清單)。
+            raw_items = action.get("items")
+            sub = None
+            if isinstance(raw_items, str):
+                from .uia_executor import _substitute_vars as _sub2
+                sub = _sub2(raw_items, step_variables)
+                # 先按換行切,整段沒換行再按逗號/頓號/分號切
+                parts = [ln for ln in sub.splitlines() if ln.strip()]
+                if len(parts) <= 1:
+                    import re as _re2
+                    parts = _re2.split(r"[,、;，；]", sub)
+                items = [p.strip() for p in parts if p.strip()]
+            elif isinstance(raw_items, list):
+                items = [str(x).strip() for x in raw_items if str(x).strip()]
+            else:
+                return ActionResult(False, index, atype,
+                    "for_each 缺 items(清單、或逗號/換行分隔的字串、或 {{變數}})")
+            if not items:
+                return ActionResult(False, index, atype,
+                    f"for_each 的 items 解析後是空清單(原值 {raw_items!r})")
+            if len(items) > 500:
+                return ActionResult(False, index, atype,
+                    f"for_each 一次最多 500 筆(拿到 {len(items)} 筆),清單來源可能抓錯")
+            var_name = (action.get("save_as") or "").strip()
+            if not var_name:
+                return ActionResult(False, index, atype,
+                    "for_each 缺 save_as(每輪的當前值要存進哪個變數,子動作用 {{變數}} 取用)")
+            do_list = action.get("do") or []
+            if not do_list:
+                return ActionResult(False, index, atype, "for_each 缺 do:(每輪要執行的子動作)")
+            cont = bool(action.get("continue_on_error", False))
+            done_n = 0
+            fail_msgs = []
+            for it_i, item in enumerate(items):
+                _check_abort(run_id)
+                step_variables[var_name] = item
+                step_variables[var_name + "_序號"] = str(it_i + 1)
+                logger.info(f"[computer_use] {indent}  ── for_each 第 {it_i+1}/{len(items)} 筆:"
+                            f"{var_name}={item!r} ──")
+                item_failed = None
+                for sub_i, sub_action in enumerate(do_list):
+                    if not isinstance(sub_action, dict):
+                        return ActionResult(False, index, atype,
+                            f"do[{sub_i}] 不是 dict，YAML 格式錯誤")
+                    sub_res = execute_action(
+                        sub_action, assets_dir, sub_i, logger, run_id,
+                        _depth=_depth + 1, **_exec_ctx,
+                    )
+                    if getattr(sub_res, "saved_var", None):
+                        step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
+                    if not sub_res.ok:
+                        item_failed = (f"第 {it_i+1} 筆({item})的 do[{sub_i+1}] "
+                                       f"({sub_res.action_type}) 失敗:{sub_res.message}")
+                        break
+                if item_failed:
+                    if not cont:
+                        return ActionResult(False, index, atype,
+                            f"for_each 中斷於{item_failed}"
+                            "(要失敗跳下一筆繼續,設 continue_on_error: true)")
+                    fail_msgs.append(item_failed)
+                    logger.warning(f"[computer_use] {indent}  ⚠ {item_failed}(continue_on_error,跳下一筆)")
+                else:
+                    done_n += 1
+            msg = f"for_each 完成 {done_n}/{len(items)} 筆"
+            if fail_msgs:
+                msg += f"(失敗 {len(fail_msgs)} 筆:" + "; ".join(m[:80] for m in fail_msgs[:3]) + ")"
+                # 有失敗但 continue_on_error:整體算成功、訊息誠實列出
+            # 迴圈變數留著(最後一筆的值),後續動作還能引用
+
         elif atype == "wait_text":
             # OCR 版等待:等畫面出現/消失某段文字。UIA 讀不到的畫面(Canvas 繪製、
             # 遠端桌面、影像串流)才用這個 —— 能用 uia_wait 就用 uia_wait(快且準)。
@@ -2246,7 +2318,9 @@ def execute_action(
                     if not still_writing and sz >= 0 and last_size.get(newest) == sz:
                         claimed.append(newest)   # 同步驟第二個 wait_download 不會重複認領
                         elapsed = time.time() - t_begin
-                        save_as = (action.get("save_as") or "").strip()
+                        # save_as 名稱也做變數替換 —— for_each 裡「下載檔{{品規_序號}}」
+                        # 才能每輪存到不同變數
+                        save_as = _sub((action.get("save_as") or ""), step_variables).strip()
                         _msg = f"下載完成:{Path(newest).name}({sz} bytes、等了 {elapsed:.1f}s)"
                         return ActionResult(True, index, atype, _msg,
                                             duration_ms=int((time.time() - t0) * 1000),

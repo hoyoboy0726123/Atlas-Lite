@@ -827,6 +827,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         ? `若「${a.control?.name || a.control?.auto_id || '元素'}」出現 → ${(a.then || []).length} 個子動作，否則 ${(a.else || []).length} 個`
                         : a.type === 'wait_download'
                         ? `等下載完成：${a.pattern || '*'}${a.save_as ? ` → {{${a.save_as}}}` : ''}`
+                        : a.type === 'for_each'
+                        ? `逐筆迴圈 ${Array.isArray(a.items) ? a.items.length + ' 筆' : `「${String(a.items || '').slice(0, 30)}」`} → {{${a.save_as || '?'}}}，每筆 ${(a.do || []).length} 個子動作`
                         : a.type === 'wait_text'
                         ? `等文字「${a.text || ''}」${a.until === 'disappear' ? '消失' : '出現'}(OCR)`
                         : a.type === 'if_text_found'
@@ -1548,6 +1550,9 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'for_each') {
+    rows.push(input('清單(逗號或換行分隔)', 'items' as any, '例：UX3407%, RC71L%, GU605%'))
+    rows.push(input('每輪存到變數', 'save_as', '例：品規'))
   } else if (t === 'wait_text') {
     rows.push(input('文字', 'text', '例：資料處理中'))
     rows.push(input('條件(until)', 'until', 'appear / disappear'))

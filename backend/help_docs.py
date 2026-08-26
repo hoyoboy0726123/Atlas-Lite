@@ -170,6 +170,28 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   `wait_text`(OCR 等文字出現/消失)、
   `if_image_found` / `if_text_found`(CV/OCR 版條件分支,同樣 then/else)。
   能用 UIA 就用 UIA —— 快、準、不受視窗遮擋影響。
+  多筆逐一查詢(5 個品規各匯出一次)用 `for_each`,不要複製五份動作:
+  ```yaml
+  - type: for_each
+    items: "UX3407%, RC71L%, GU605%"   # 或 {{ input.品規清單 }}、或畫面讀下來的變數
+    save_as: 品規                       # 每輪把當前值放進 {{品規}}
+    continue_on_error: true            # 某筆失敗跳下一筆(預設 false = 整個中斷)
+    do:
+      - {type: uia_send_keys, control: {auto_id: spec}, text: "{{品規}}"}
+      - {type: uia_click, control: {name: "匯出/Export"}}
+      - {type: uia_wait, control: {type: Text, name: "資料處理中*"}, until: appear, timeout_sec: 10}
+      - {type: uia_wait, control: {type: Text, name: "資料處理中*"}, until: disappear, timeout_sec: 300}
+      - type: if_element_found
+        control: {type: Button, name: "確定"}
+        timeout_sec: 6
+        then:
+          - {type: uia_click, control: {type: Button, name: "確定"}}
+          - {type: uia_wait, control: {type: Button, name: "確定"}, until: disappear, timeout_sec: 5}
+        else:
+          - {type: wait_download, pattern: "PP_Component*.xlsx", timeout_sec: 300, save_as: 下載檔}
+  ```
+  另外 {{品規_序號}} 是當前第幾筆(1 起算)。清單也可以先用 uia_get_text 從
+  另一個頁面讀下來存變數,items 填 {{那個變數}}(會按換行/逗號切)。
   wait_download 只認「動作開始後新出現、且寫完」的檔案（排除 .crdownload 半成品、
   大小穩定才算完成）；save_as 存完整路徑。dir 空值 = 使用者的 Downloads 資料夾。
 - 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：

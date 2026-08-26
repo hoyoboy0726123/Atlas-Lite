@@ -176,6 +176,9 @@ class ComputerUseAction(BaseModel):
     # wait_download 用
     dir: str = ""                # 下載資料夾；空 = 使用者的 Downloads
     pattern: str = "*"           # 檔名 glob（例：PP_Component*.xlsx）
+    # for_each 用
+    items: Optional[Union[str, list]] = None  # 清單、或逗號/換行分隔字串、或 {{變數}}
+    continue_on_error: bool = False           # 某筆失敗時跳下一筆繼續（預設整個中斷）
     row: int | str = 0           # uia_click_cell 用，可填 "{{row_count + 1}}" 延後解析
     column: int | str = 0
     check: str = ""              # uia_assert_state：exists / enabled / focused / checked
