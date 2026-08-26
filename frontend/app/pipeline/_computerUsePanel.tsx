@@ -4,6 +4,7 @@ import OcrFieldInserter from './_ocrFieldInserter'
 import WaitDownloadInserter from './_waitDownloadInserter'
 import OcrWaitInserter from './_ocrWaitInserter'
 import ForEachInserter from './_forEachInserter'
+import ClipboardReadInserter from './_clipboardReadInserter'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -59,6 +60,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [dlInsertOpenAt, setDlInsertOpenAt] = useState<number | null>(null)
   const [ocrWaitOpenAt, setOcrWaitOpenAt] = useState<number | null>(null)
   const [feOpenAt, setFeOpenAt] = useState<number | null>(null)
+  const [crOpenAt, setCrOpenAt] = useState<number | null>(null)
 
   /** 在 index 位置插入一個動作。 */
   const insertActionAt = (index: number, action: ComputerUseAction) => {
@@ -667,6 +669,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   onInsert={insertActionAt}
                   onWrapAll={wrapAllIntoForEach}
                 />
+              <ClipboardReadInserter
+                  index={0}
+                  isOpen={crOpenAt === 0}
+                  openMenu={() => setCrOpenAt(0)}
+                  closeMenu={() => setCrOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
@@ -703,6 +712,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       closeMenu={() => setFeOpenAt(null)}
                       onInsert={insertActionAt}
                       onWrapAll={wrapAllIntoForEach}
+                    />
+                  <ClipboardReadInserter
+                      index={i}
+                      isOpen={crOpenAt === i}
+                      openMenu={() => setCrOpenAt(i)}
+                      closeMenu={() => setCrOpenAt(null)}
+                      onAdd={insertActionAt}
                     />
                   <button type="button"
                     onClick={() => setUiaInsertAt(uiaInsertAt === i ? null : i)}
@@ -1285,6 +1301,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setFeOpenAt(null)}
                   onInsert={insertActionAt}
                   onWrapAll={wrapAllIntoForEach}
+                />
+              <ClipboardReadInserter
+                  index={data.actions.length}
+                  isOpen={crOpenAt === data.actions.length}
+                  openMenu={() => setCrOpenAt(data.actions.length)}
+                  closeMenu={() => setCrOpenAt(null)}
+                  onAdd={insertActionAt}
                 />
             </div>
           )}
