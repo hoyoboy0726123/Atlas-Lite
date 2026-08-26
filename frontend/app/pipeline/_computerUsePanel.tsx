@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import OcrFieldInserter from './_ocrFieldInserter'
 import WaitDownloadInserter from './_waitDownloadInserter'
+import OcrWaitInserter from './_ocrWaitInserter'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -55,6 +56,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [insertOpenAt, setInsertOpenAt] = useState<number | null>(null)
   // ⬇ 等下載插入器的開關(與 OCR 插入器同一套 index 邏輯、各自獨立)
   const [dlInsertOpenAt, setDlInsertOpenAt] = useState<number | null>(null)
+  const [ocrWaitOpenAt, setOcrWaitOpenAt] = useState<number | null>(null)
 
   /** 在 index 位置插入一個動作。 */
   const insertActionAt = (index: number, action: ComputerUseAction) => {
@@ -642,6 +644,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setDlInsertOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <OcrWaitInserter
+                  index={0}
+                  isOpen={ocrWaitOpenAt === 0}
+                  openMenu={() => setOcrWaitOpenAt(0)}
+                  closeMenu={() => setOcrWaitOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
@@ -661,6 +670,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       isOpen={dlInsertOpenAt === i}
                       openMenu={() => setDlInsertOpenAt(i)}
                       closeMenu={() => setDlInsertOpenAt(null)}
+                      onAdd={insertActionAt}
+                    />
+                  <OcrWaitInserter
+                      index={i}
+                      isOpen={ocrWaitOpenAt === i}
+                      openMenu={() => setOcrWaitOpenAt(i)}
+                      closeMenu={() => setOcrWaitOpenAt(null)}
                       onAdd={insertActionAt}
                     />
                   <button type="button"
@@ -1225,6 +1241,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setDlInsertOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <OcrWaitInserter
+                  index={data.actions.length}
+                  isOpen={ocrWaitOpenAt === data.actions.length}
+                  openMenu={() => setOcrWaitOpenAt(data.actions.length)}
+                  closeMenu={() => setOcrWaitOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </div>
           )}
         </div>
@@ -1579,6 +1602,7 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
     )
   } else if (t === 'assert_text' || t === 'wait_image') {
     if ('ocr_text' in action) rows.push(input('目標文字', 'ocr_text' as any, ''))
+    if (t === 'wait_image') rows.push(input('條件(until)', 'until' as any, 'appear / disappear(等消失)'))
   }
 
   return (
