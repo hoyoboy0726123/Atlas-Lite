@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import OcrFieldInserter from './_ocrFieldInserter'
+import WaitDownloadInserter from './_waitDownloadInserter'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -52,6 +53,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [cvOpen, setCvOpen] = useState(false)
   // ➕ 插入點:用「要插在哪個 index」表示開哪一個 popover（actions.length = 插在最後）
   const [insertOpenAt, setInsertOpenAt] = useState<number | null>(null)
+  // ⬇ 等下載插入器的開關(與 OCR 插入器同一套 index 邏輯、各自獨立)
+  const [dlInsertOpenAt, setDlInsertOpenAt] = useState<number | null>(null)
 
   /** 在 index 位置插入一個動作。 */
   const insertActionAt = (index: number, action: ComputerUseAction) => {
@@ -632,6 +635,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setInsertOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <WaitDownloadInserter
+                  index={0}
+                  isOpen={dlInsertOpenAt === 0}
+                  openMenu={() => setDlInsertOpenAt(0)}
+                  closeMenu={() => setDlInsertOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
@@ -646,6 +656,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                     closeMenu={() => setInsertOpenAt(null)}
                     onAdd={insertActionAt}
                   />
+                  <WaitDownloadInserter
+                      index={i}
+                      isOpen={dlInsertOpenAt === i}
+                      openMenu={() => setDlInsertOpenAt(i)}
+                      closeMenu={() => setDlInsertOpenAt(null)}
+                      onAdd={insertActionAt}
+                    />
                   <button type="button"
                     onClick={() => setUiaInsertAt(uiaInsertAt === i ? null : i)}
                     title="把「選擇器 / 讀文字 / 填入文字」新增的動作插到這個位置（再點一次取消、回到加在最後）"
@@ -1195,6 +1212,13 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   isOpen={insertOpenAt === data.actions.length}
                   openMenu={() => setInsertOpenAt(data.actions.length)}
                   closeMenu={() => setInsertOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
+              <WaitDownloadInserter
+                  index={data.actions.length}
+                  isOpen={dlInsertOpenAt === data.actions.length}
+                  openMenu={() => setDlInsertOpenAt(data.actions.length)}
+                  closeMenu={() => setDlInsertOpenAt(null)}
                   onAdd={insertActionAt}
                 />
             </div>

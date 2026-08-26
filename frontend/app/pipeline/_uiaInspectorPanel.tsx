@@ -117,6 +117,8 @@ function describeAction(
       return `選「${target}」→ ${txt || '?'}`
     case 'uia_wait':
       return `等「${target}」${(extra as any).until === 'disappear' ? '消失' : (extra as any).until === 'text_contains' ? `文字含「${txt}」` : (extra as any).until === 'text_equals' ? `文字=「${txt}」` : '出現'}`
+    case 'if_element_found':
+      return `若「${target}」出現 → ${(((extra as any).then || []) as unknown[]).length} 個子動作，否則 ${(((extra as any)['else'] || []) as unknown[]).length} 個`
     case 'uia_set_clipboard':
       return `寫剪貼簿 ← ${txt || ''}`
     default:
@@ -754,6 +756,12 @@ function UiaActionPicker({
   const [waitUntil, setWaitUntil] = useState('appear')
   const [waitText, setWaitText] = useState('')
   const [waitTimeout, setWaitTimeout] = useState('60')
+  const [ifTimeout, setIfTimeout] = useState('3')
+  const [ifThen, setIfThen] = useState('click')
+  const [ifElse, setIfElse] = useState('none')
+  const [ifDlPattern, setIfDlPattern] = useState('*.xlsx')
+  const [ifDlTimeout, setIfDlTimeout] = useState('300')
+  const [ifDlSaveAs, setIfDlSaveAs] = useState('下載檔')
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const isGrid = ['DataGrid', 'List', 'Tree', 'Table'].some(s => element.type.includes(s))
@@ -943,6 +951,73 @@ function UiaActionPicker({
         <div className="text-[10px] text-amber-700/70">
           例：按查詢後等「查詢中」遮罩<b>消失</b>、或等結果區<b>文字包含</b>「已匯出」再做下一步。
           條件不成立會等到逾時才誠實失敗。
+        </div>
+      </div>
+
+      {/* 條件分歧:元素出現與否走不同路(查無資料對話框 vs 有資料下載) */}
+      <div className="bg-sky-50/60 border border-sky-200 rounded p-2 space-y-1">
+        <div className="text-[11px] font-semibold text-sky-700">❓ 若這個元素出現…（條件分歧）</div>
+        <div className="flex gap-1 items-center flex-wrap text-[10px] text-gray-600">
+          探測
+          <input value={ifTimeout} onChange={e => setIfTimeout(e.target.value)}
+            className="w-10 border border-gray-200 rounded px-1.5 py-1 text-xs text-right" title="最多探測幾秒" />
+          秒，出現 →
+          <select value={ifThen} onChange={e => setIfThen(e.target.value)}
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs">
+            <option value="click">點擊這個元素</option>
+            <option value="none">不做動作</option>
+          </select>
+          否則 →
+          <select value={ifElse} onChange={e => setIfElse(e.target.value)}
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs">
+            <option value="none">不做動作</option>
+            <option value="download">等下載完成</option>
+          </select>
+        </div>
+        {ifElse === 'download' && (
+          <div className="flex gap-1 items-center flex-wrap">
+            <input value={ifDlPattern} onChange={e => setIfDlPattern(e.target.value)}
+              placeholder="檔名樣式，例：*.xlsx"
+              className="flex-1 min-w-[110px] border border-gray-200 rounded px-2 py-1 text-xs font-mono" />
+            <input value={ifDlTimeout} onChange={e => setIfDlTimeout(e.target.value)}
+              className="w-14 border border-gray-200 rounded px-2 py-1 text-xs text-right" title="下載最多等幾秒" />
+            <span className="text-[10px] text-gray-400">秒 → 變數</span>
+            <input value={ifDlSaveAs} onChange={e => setIfDlSaveAs(e.target.value)}
+              placeholder="下載檔"
+              className="w-20 border border-gray-200 rounded px-2 py-1 text-xs font-mono" />
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            onClick={() => {
+              const control = {
+                ...(element.type ? { type: element.type } : {}),
+                ...(element.name ? { name: element.name } : {}),
+                ...(element.auto_id ? { auto_id: element.auto_id } : {}),
+              }
+              const thenActs: ComputerUseAction[] = ifThen === 'click'
+                ? [{ type: 'uia_click', control, description: `點擊「${element.name || element.type}」` }]
+                : []
+              const elseActs: ComputerUseAction[] = ifElse === 'download'
+                ? [{ type: 'wait_download', pattern: ifDlPattern.trim() || '*',
+                     timeout_sec: Number(ifDlTimeout) || 300,
+                     ...(ifDlSaveAs.trim() ? { save_as: ifDlSaveAs.trim() } : {}),
+                     description: `等下載完成：${ifDlPattern.trim() || '*'}` }]
+                : []
+              onAdd('if_element_found', {
+                timeout_sec: Number(ifTimeout) || 3,
+                then: thenActs,
+                else: elseActs,
+              })
+            }}
+            className="shrink-0 whitespace-nowrap px-2 py-1 bg-sky-600 text-white rounded text-xs hover:bg-sky-700 transition-colors"
+          >
+            ❓ 加入分歧
+          </button>
+        </div>
+        <div className="text-[10px] text-sky-700/70">
+          典型：匯出後「查無資料」對話框的「確定」鈕 —— 出現就按掉繼續，沒出現代表有資料、走等下載。
+          探測不到不算失敗、只是走「否則」分支。
         </div>
       </div>
 
