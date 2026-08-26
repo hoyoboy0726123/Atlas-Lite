@@ -131,7 +131,14 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
     #   症狀:inspect_window 看得到 auto_id、_find_control 卻回「找不到控制項」。
     kwargs = {"searchDepth": control_def.get("depth", 30)}
     if name:
-        kwargs["Name"] = name
+        if "*" in name:
+            # 萬用字元 → RegexName。真實系統的遮罩/狀態文字常沒有 auto_id、
+            # 只有「資料處理中...」這種文字,結尾的刪節號還有 ... 與 … 兩種寫法,
+            # 要求一字不差太脆 —— name: "資料處理中*" 就能對上。
+            import re as _re
+            kwargs["RegexName"] = "^" + _re.escape(name).replace(r"\*", ".*") + "$"
+        else:
+            kwargs["Name"] = name
     if auto_id:
         kwargs["AutomationId"] = auto_id
 

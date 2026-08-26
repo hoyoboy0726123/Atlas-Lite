@@ -146,6 +146,11 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   `{type: uia_wait, control: {auto_id: loading}, until: disappear, timeout_sec: 120}`（等「查詢中」遮罩消失）
   `{type: uia_wait, control: {auto_id: result}, until: text_contains, text: "已匯出", timeout_sec: 120}`
   until 可用 appear / disappear / text_contains / text_equals；逾時誠實失敗。
+  遮罩常沒有 auto_id、只有「資料處理中...」文字 —— control 的 name 支援
+  萬用字元:`control: {type: Text, name: "資料處理中*"}`。
+  ⚠ 只等 disappear 有競態:按下按鈕後遮罩還沒 render 就檢查、會誤判「已消失」。
+  保險寫法是兩段:先 `until: appear`(短逾時)等它出現、再 `until: disappear` 等它消失；
+  或改等結果元素 `text_contains` 關鍵字。
 - 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：
   `{type: uia_select, control: {type: ComboBoxControl, auto_id: month}, text: "{{ now.month }}"}`
   背景 pattern 選取 + 回讀驗證，選項文字要一字不差（08 不是 8）。
