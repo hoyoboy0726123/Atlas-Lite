@@ -729,6 +729,25 @@ def execute_uia_action(action: dict, step_window: str,
                 + (f"、text=「{want}」" if want else "") + f"){detail}。"
                 "查詢比預期久的話調大 timeout_sec")
 
+        elif atype == "uia_get_clipboard":
+            # 讀剪貼簿存變數 —— UIA 讀不到內容的工具(Tkinter 沒有 UIA provider、
+            # 整個視窗是空白 Pane)用「工具端複製 → 這裡讀」的剪貼簿交接。
+            # 典型:Tk 工具按「複製勾選清單」→ uia_get_clipboard → for_each 逐筆跑。
+            save_as = (action.get("save_as") or "").strip()
+            if not save_as:
+                return UiaActionResult(False, "uia_get_clipboard 缺 save_as(存到哪個變數)")
+            try:
+                import pyperclip
+                txt = pyperclip.paste()
+            except Exception as e:
+                return UiaActionResult(False, f"讀剪貼簿失敗:{e}")
+            if not (txt or "").strip():
+                return UiaActionResult(False,
+                    "剪貼簿是空的 —— 來源工具還沒按「複製」?或前面少了點按複製鈕的動作")
+            return UiaActionResult(True,
+                f"讀到剪貼簿 {len(txt)} 字:{txt[:60]!r}、存到 {save_as}",
+                saved_var=(save_as, txt))
+
         elif atype == "uia_set_clipboard":
             # 把文字塞進 Windows 剪貼簿、給後續 Ctrl+V 用、跨步驟 / 跨節點傳值用
             # 文字支援 {{變數}} 替換(get_text / get_table_rowcount 存的變數都能用)

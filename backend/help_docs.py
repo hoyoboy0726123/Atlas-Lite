@@ -170,6 +170,17 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   `wait_text`(OCR 等文字出現/消失)、
   `if_image_found` / `if_text_found`(CV/OCR 版條件分支,同樣 then/else)。
   能用 UIA 就用 UIA —— 快、準、不受視窗遮擋影響。
+  Tkinter 寫的工具 UIA 讀不到內容(Tk 沒有 UIA provider、整個視窗是空白
+  Pane)。清單在 Tk 工具裡時用「剪貼簿交接」:工具端做一顆「複製清單」鈕
+  (勾選的項目一行一筆放進剪貼簿),Atlas 端:
+  ```yaml
+  - {type: activate_window, title_contains: "那隻工具"}
+  - {type: click_at, x: 按鈕X, y: 按鈕Y}          # 或 click_image 按鈕截圖
+  - {type: wait, seconds: 0.5}
+  - {type: uia_get_clipboard, save_as: 清單原文}   # 剪貼簿空的會誠實報錯
+  - {type: for_each, items: "{{清單原文}}", save_as: 品規, do: [...]}
+  ```
+  工具端也可以改成直接 POST /pipeline/run 帶 input_params(最乾淨,連點擊都免)。
   多筆逐一查詢(5 個品規各匯出一次)用 `for_each`,不要複製五份動作:
   ```yaml
   - type: for_each

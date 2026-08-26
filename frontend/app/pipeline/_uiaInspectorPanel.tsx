@@ -119,6 +119,8 @@ function describeAction(
       return `等「${target}」${(extra as any).until === 'disappear' ? '消失' : (extra as any).until === 'text_contains' ? `文字含「${txt}」` : (extra as any).until === 'text_equals' ? `文字=「${txt}」` : '出現'}`
     case 'if_element_found':
       return `若「${target}」出現 → ${(((extra as any).then || []) as unknown[]).length} 個子動作，否則 ${(((extra as any)['else'] || []) as unknown[]).length} 個`
+    case 'uia_get_clipboard':
+      return `讀剪貼簿 → {{${(extra as any).save_as || '?'}}}`
     case 'uia_set_clipboard':
       return `寫剪貼簿 ← ${txt || ''}`
     default:
@@ -1156,7 +1158,7 @@ function UiaActionPicker({
           </HelpTooltip>
         </div>
         <div className="text-[10px] text-cyan-700/70">
-          配合「讀文字」用:讀取 → 寫剪貼簿 → 後續 Ctrl+V 貼到目標應用。{`{{變數}}`} 會被當下 step 變數值替換。
+          配合「讀文字」用:讀取 → 寫剪貼簿 → 後續 Ctrl+V 貼到目標應用。反向(讀剪貼簿存變數)在動作列表用 YAML/助手加 uia_get_clipboard,或用下方讀取鈕。{`{{變數}}`} 會被當下 step 變數值替換。
         </div>
       </div>
 
