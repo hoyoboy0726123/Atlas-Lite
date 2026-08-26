@@ -527,34 +527,50 @@ def execute_uia_action(action: dict, step_window: str,
             item = None
             via = ""
             expanded = False
-            for attempt in ("collapsed", "expanded"):
-                if attempt == "expanded":
-                    ecp = _get_pat(ctrl, "ExpandCollapsePattern")
-                    if not ecp:
-                        break
-                    try:
-                        ecp.Expand()
+            for round_no in (1, 2, 3):
+                for attempt in ("collapsed", "expanded"):
+                    if attempt == "expanded":
+                        ecp = _get_pat(ctrl, "ExpandCollapsePattern")
+                        if not ecp:
+                            break
+                        try:
+                            ecp.Expand()
+                        except Exception as _e:
+                            # Chromium(Edge) 的 UIA 常在動作「已生效」時照樣丟
+                            # COMError「事件無法啟動任何訂閱者」—— 不能當失敗中止，
+                            # 展開成沒成交給後面的搜尋結果決定。
+                            logger.debug(f"[uia] Expand 丟例外(可能已生效):{_e}")
                         expanded = True
-                        time.sleep(0.4)   # 給清單 render 時間
-                    except Exception as _e:
-                        logger.debug(f"[uia] Expand 失敗:{_e}")
-                        break
-                try:
-                    cand = ctrl.ListItemControl(Name=option, searchDepth=8)
-                    if cand.Exists(1, 0.2):
-                        item = cand
-                        break
-                except Exception:
-                    pass
-                # 展開後的清單可能掛在視窗層而不是 combo 底下（原生 app 常見）
-                if attempt == "expanded" and win is not None:
+                        time.sleep(0.3 * round_no + 0.1)   # 給清單 render 時間,逐輪加長
                     try:
-                        cand = win.ListItemControl(Name=option, searchDepth=30)
+                        cand = ctrl.ListItemControl(Name=option, searchDepth=8)
                         if cand.Exists(1, 0.2):
                             item = cand
                             break
                     except Exception:
                         pass
+                    # 展開後的清單可能掛在視窗層而不是 combo 底下（原生 app 常見）
+                    if attempt == "expanded" and win is not None:
+                        try:
+                            cand = win.ListItemControl(Name=option, searchDepth=30)
+                            if cand.Exists(1, 0.2):
+                                item = cand
+                                break
+                        except Exception:
+                            pass
+                if item is not None:
+                    break
+                # Edge 的 a11y 樹會「冷掉」:視窗一陣子沒被輔助工具查詢,
+                # 收合下拉的子項從樹上消失、連 Expand 都生不出清單。
+                # 實際列舉子元素會逼 Chromium 重建樹,醒了之後下一輪就找得到。
+                logger.debug(f"[uia] 第 {round_no} 輪沒找到「{option}」,敲醒 a11y 樹重試")
+                try:
+                    ctrl.GetChildren()
+                    if win is not None:
+                        win.GetChildren()
+                except Exception:
+                    pass
+                time.sleep(0.6)
             if item is None:
                 if expanded:
                     try:
@@ -568,8 +584,12 @@ def execute_uia_action(action: dict, step_window: str,
                     + "。檢查:選項文字要一字不差（含前導零，08 不是 8）")
 
             sel = _get_pat(item, "SelectionItemPattern")
+            select_err = None
             if sel is not None:
-                sel.Select()
+                try:
+                    sel.Select()
+                except Exception as _e:
+                    select_err = _e   # 同 Expand 的 Chromium quirk:回讀驗證定成敗
                 via = "SelectionItemPattern"
             else:
                 item.Click()
@@ -582,13 +602,17 @@ def execute_uia_action(action: dict, step_window: str,
 
             # 回讀驗證 —— 「選了」不等於「選對」。ComboBox 的 ValuePattern
             # 會回當前選中的選項文字，讀得到就核對；讀不到就誠實標註未驗證。
-            time.sleep(0.15)
+            time.sleep(0.25)
             vp = _get_pat(ctrl, "ValuePattern")
             got = ""
             try:
                 got = str(getattr(vp, "Value", "") or "") if vp else ""
             except Exception:
                 got = ""
+            if not got and select_err is not None:
+                return UiaActionResult(
+                    False,
+                    f"Select 丟例外且無法回讀驗證是否生效:{select_err}")
             if got and got.strip() != option:
                 return UiaActionResult(
                     False,
