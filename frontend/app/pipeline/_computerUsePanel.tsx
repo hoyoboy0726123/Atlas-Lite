@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import OcrFieldInserter from './_ocrFieldInserter'
 import WaitDownloadInserter from './_waitDownloadInserter'
 import OcrWaitInserter from './_ocrWaitInserter'
+import ForEachInserter from './_forEachInserter'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -57,12 +58,18 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   // ⬇ 等下載插入器的開關(與 OCR 插入器同一套 index 邏輯、各自獨立)
   const [dlInsertOpenAt, setDlInsertOpenAt] = useState<number | null>(null)
   const [ocrWaitOpenAt, setOcrWaitOpenAt] = useState<number | null>(null)
+  const [feOpenAt, setFeOpenAt] = useState<number | null>(null)
 
   /** 在 index 位置插入一個動作。 */
   const insertActionAt = (index: number, action: ComputerUseAction) => {
     const next = [...(data.actions || [])]
     next.splice(index, 0, action)
     onUpdate({ actions: next })
+  }
+
+  /** 把目前序列的全部動作包進一個 for_each(先調通單筆、再一鍵套迴圈)。 */
+  const wrapAllIntoForEach = (fe: ComputerUseAction) => {
+    onUpdate({ actions: [{ ...fe, do: [...(data.actions || [])] }] })
   }
 
   // 點面板其他地方就關掉 popover（不然它會一直蓋在動作列表上）
@@ -651,6 +658,15 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setOcrWaitOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <ForEachInserter
+                  index={0}
+                  isOpen={feOpenAt === 0}
+                  hasActions={(data.actions || []).length > 0}
+                  openMenu={() => setFeOpenAt(0)}
+                  closeMenu={() => setFeOpenAt(null)}
+                  onInsert={insertActionAt}
+                  onWrapAll={wrapAllIntoForEach}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
@@ -678,6 +694,15 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       openMenu={() => setOcrWaitOpenAt(i)}
                       closeMenu={() => setOcrWaitOpenAt(null)}
                       onAdd={insertActionAt}
+                    />
+                  <ForEachInserter
+                      index={i}
+                      isOpen={feOpenAt === i}
+                      hasActions={(data.actions || []).length > 0}
+                      openMenu={() => setFeOpenAt(i)}
+                      closeMenu={() => setFeOpenAt(null)}
+                      onInsert={insertActionAt}
+                      onWrapAll={wrapAllIntoForEach}
                     />
                   <button type="button"
                     onClick={() => setUiaInsertAt(uiaInsertAt === i ? null : i)}
@@ -1250,6 +1275,15 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setOcrWaitOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <ForEachInserter
+                  index={data.actions.length}
+                  isOpen={feOpenAt === data.actions.length}
+                  hasActions={(data.actions || []).length > 0}
+                  openMenu={() => setFeOpenAt(data.actions.length)}
+                  closeMenu={() => setFeOpenAt(null)}
+                  onInsert={insertActionAt}
+                  onWrapAll={wrapAllIntoForEach}
+                />
             </div>
           )}
         </div>
@@ -1551,7 +1585,18 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
   } else if (t === 'for_each') {
-    rows.push(input('清單(逗號或換行分隔)', 'items' as any, '例：UX3407%, RC71L%, GU605%'))
+    rows.push(
+      <div key="items" className="space-y-0.5">
+        <span className="text-[10px] text-gray-500">{'清單（一行一筆；也可 {{變數}}）'}</span>
+        <textarea
+          value={Array.isArray(action.items) ? action.items.join('\n') : String(action.items ?? '')}
+          onChange={e => onPatch({ items: e.target.value } as any)}
+          rows={5}
+          placeholder={'UX3407%\nRC71L%\nGU605%'}
+          className="w-full border border-indigo-200 rounded px-2 py-1 text-xs font-mono resize-y"
+        />
+      </div>,
+    )
     rows.push(input('每輪存到變數', 'save_as', '例：品規'))
   } else if (t === 'wait_text') {
     rows.push(input('文字', 'text', '例：資料處理中'))
