@@ -160,9 +160,16 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
     timeout_sec: 5
     then:                            # 出現 → 按確定、繼續下一筆
       - {type: uia_click, control: {type: Button, name: "確定"}}
+      # 剛彈出的對話框會吃掉點擊(回報成功卻沒關) —— 點完必須等它消失驗證
+      - {type: uia_wait, control: {type: Button, name: "確定"}, until: disappear, timeout_sec: 5}
     else:                            # 沒出現 → 等下載完成
       - {type: wait_download, pattern: "PP_Component*.xlsx", timeout_sec: 300, save_as: 下載檔}
   ```
+  UIA 讀不到的畫面(Canvas 繪製、遠端桌面)有 CV/OCR 替代:
+  `wait_image`(等錨點圖出現;`until: disappear` 等它消失)、
+  `wait_text`(OCR 等文字出現/消失)、
+  `if_image_found` / `if_text_found`(CV/OCR 版條件分支,同樣 then/else)。
+  能用 UIA 就用 UIA —— 快、準、不受視窗遮擋影響。
   wait_download 只認「動作開始後新出現、且寫完」的檔案（排除 .crdownload 半成品、
   大小穩定才算完成）；save_as 存完整路徑。dir 空值 = 使用者的 Downloads 資料夾。
 - 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：

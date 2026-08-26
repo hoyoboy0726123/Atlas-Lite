@@ -93,7 +93,7 @@ export interface ComputerUseAction {
       | 'uia_click' | 'uia_send_keys' | 'uia_get_text' | 'uia_get_table_rowcount' | 'uia_click_cell'
       | 'uia_wait_enabled' | 'uia_assert_state' | 'uia_close_window' | 'uia_set_clipboard'
       | 'uia_select' | 'uia_wait'
-      | 'if_element_found' | 'wait_download'
+      | 'if_element_found' | 'wait_download' | 'wait_text' | 'if_text_found'
       | 'ocr_get_text'
   // ── ocr_get_text 專用：讀「標籤旁邊的值」存成變數 ──
   label?: string        // 要找的標籤文字（例：總計金額）

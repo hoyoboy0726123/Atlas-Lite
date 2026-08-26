@@ -1635,16 +1635,25 @@ def execute_action(
             region_rect = _parse_search_region(action)
             deadline = time.time() + timeout
             last_conf = 0.0
+            # until: disappear = 等錨點圖「消失」(查詢遮罩、loading 動畫收掉)
+            _u = action.get("until")
+            want_gone = isinstance(_u, str) and _u.strip() == "disappear"
             while time.time() < deadline:
                 _check_abort(run_id)
                 m = find_template(str(tpl_path), threshold=threshold, multi_scale=True,
                                   region=region_rect)
-                if m.found:
+                if not want_gone and m.found:
                     msg = f"{img_name} 出現（conf={m.confidence:.2f}）"
+                    break
+                if want_gone and not m.found:
+                    msg = f"{img_name} 已消失"
                     break
                 last_conf = max(last_conf, m.confidence)
                 time.sleep(0.3)
             else:
+                if want_gone:
+                    return ActionResult(False, index, atype,
+                        f"等待 {timeout}s {img_name} 仍在畫面上（conf={last_conf:.2f}）")
                 return ActionResult(False, index, atype,
                     f"等待 {timeout}s 仍未出現 {img_name}（最佳 {last_conf:.2f} < {threshold}）")
 
@@ -1977,6 +1986,131 @@ def execute_action(
             msg = (f"assert 通過：文字 '{text}' 可見 @ {found_ocr.center} "
                    f"(matched='{found_ocr.text[:30]}', conf={found_ocr.confidence:.2f})")
 
+        elif atype == "wait_text":
+            # OCR 版等待:等畫面出現/消失某段文字。UIA 讀不到的畫面(Canvas 繪製、
+            # 遠端桌面、影像串流)才用這個 —— 能用 uia_wait 就用 uia_wait(快且準)。
+            text = (action.get("text") or "").strip()
+            if not text:
+                return ActionResult(False, index, atype, "wait_text 缺 text 欄位")
+            _u = action.get("until")
+            until = _u.strip() if isinstance(_u, str) and _u.strip() else "appear"
+            if until not in ("appear", "disappear"):
+                return ActionResult(False, index, atype,
+                    f"wait_text 不認得 until={until!r}(可用:appear/disappear)")
+            try:
+                from .ocr import find_text_on_screen
+            except Exception as _e:
+                return ActionResult(False, index, atype, f"無法載入 OCR 模組:{_e}")
+            timeout = float(action.get("timeout_sec", 60))
+            threshold = float(action.get("ocr_threshold") or ocr_threshold)
+            region_rect = _parse_search_region(action)
+            if region_rect is None:
+                # 預設把 OCR 限縮在目標視窗範圍 —— 全螢幕掃會把終端機/編輯器裡
+                # 剛好含同字樣的文字也算進去(實測:螢幕上開著含 YAML 原始碼的視窗,
+                # 「資料處理中」永遠讀得到、等消失等到超時)。
+                _wp = (action.get("window") or uia_window or "").strip()
+                if _wp:
+                    try:
+                        from .uia_executor import _get_auto, _resolve_window
+                        _a = _get_auto()
+                        _w = _resolve_window(_a, {}, _wp)
+                        if _w.Exists(1, 0.3):
+                            _r = _w.BoundingRectangle
+                            region_rect = (_r.left, _r.top,
+                                           _r.right - _r.left, _r.bottom - _r.top)
+                    except Exception:
+                        pass
+            deadline = time.time() + timeout
+            t_w0 = time.time()
+            last_reason = ""
+            while time.time() < deadline:
+                _check_abort(run_id)
+                screen_bgr, sx, sy = _capture_screen()
+                ocr_res = find_text_on_screen(
+                    screen_bgr, text, origin_x=sx, origin_y=sy,
+                    lang_tag="zh-Hant-TW", threshold=threshold, region=region_rect)
+                if until == "appear" and ocr_res.found:
+                    msg = f"文字「{text}」出現、等了 {time.time()-t_w0:.1f}s"
+                    break
+                if until == "disappear" and not ocr_res.found:
+                    msg = f"文字「{text}」已消失、等了 {time.time()-t_w0:.1f}s"
+                    break
+                last_reason = getattr(ocr_res, "reason", "")
+                time.sleep(0.5)
+            else:
+                verb = "仍未出現" if until == "appear" else "仍在畫面上"
+                return ActionResult(False, index, atype,
+                    f"等了 {timeout:.0f}s 文字「{text}」{verb}"
+                    + (f"（{last_reason}）" if last_reason else ""))
+
+        elif atype == "if_text_found":
+            # OCR 版條件分支:畫面上讀得到某段文字 → then[]、讀不到 → else[]。
+            # UIA 抓不到的對話框/畫面用這個;讀不到不算失敗、走 else。
+            text = (action.get("text") or "").strip()
+            if not text:
+                return ActionResult(False, index, atype, "if_text_found 缺 text 欄位")
+            try:
+                from .ocr import find_text_on_screen
+            except Exception as _e:
+                return ActionResult(False, index, atype, f"無法載入 OCR 模組:{_e}")
+            timeout = float(action.get("timeout_sec", 3.0))
+            threshold = float(action.get("ocr_threshold") or ocr_threshold)
+            region_rect = _parse_search_region(action)
+            if region_rect is None:
+                # 預設把 OCR 限縮在目標視窗範圍 —— 全螢幕掃會把終端機/編輯器裡
+                # 剛好含同字樣的文字也算進去(實測:螢幕上開著含 YAML 原始碼的視窗,
+                # 「資料處理中」永遠讀得到、等消失等到超時)。
+                _wp = (action.get("window") or uia_window or "").strip()
+                if _wp:
+                    try:
+                        from .uia_executor import _get_auto, _resolve_window
+                        _a = _get_auto()
+                        _w = _resolve_window(_a, {}, _wp)
+                        if _w.Exists(1, 0.3):
+                            _r = _w.BoundingRectangle
+                            region_rect = (_r.left, _r.top,
+                                           _r.right - _r.left, _r.bottom - _r.top)
+                    except Exception:
+                        pass
+            deadline = time.time() + timeout
+            found = False
+            while True:
+                _check_abort(run_id)
+                screen_bgr, sx, sy = _capture_screen()
+                ocr_res = find_text_on_screen(
+                    screen_bgr, text, origin_x=sx, origin_y=sy,
+                    lang_tag="zh-Hant-TW", threshold=threshold, region=region_rect)
+                if ocr_res.found:
+                    found = True
+                    break
+                if time.time() >= deadline:
+                    break
+                time.sleep(0.4)
+            if found:
+                time.sleep(0.5)   # 同 if_element_found:對話框開場動畫吃點擊
+            branch = action.get("then", []) if found else action.get("else", [])
+            branch = branch or []
+            branch_label = "then" if found else "else"
+            logger.info(f"[computer_use] {indent}  → 文字「{text}」"
+                        f"{'讀得到' if found else '讀不到'} → 走 {branch_label} 分支"
+                        f"（{len(branch)} 個子動作）")
+            for sub_i, sub_action in enumerate(branch):
+                if not isinstance(sub_action, dict):
+                    return ActionResult(False, index, atype,
+                        f"{branch_label}[{sub_i}] 不是 dict，YAML 格式錯誤")
+                sub_res = execute_action(
+                    sub_action, assets_dir, sub_i, logger, run_id,
+                    _depth=_depth + 1, **_exec_ctx,
+                )
+                if getattr(sub_res, "saved_var", None):
+                    step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
+                if not sub_res.ok:
+                    return ActionResult(False, index, atype,
+                        f"if_text_found/{branch_label}[{sub_i+1}] "
+                        f"({sub_res.action_type}) 失敗：{sub_res.message}")
+            msg = (f"if 文字「{text}」{'讀得到' if found else '讀不到'} → 執行 {branch_label}"
+                   f"（{len(branch)} 個子動作皆 OK）")
+
         elif atype == "if_image_found":
             # 條件分支：根據錨點圖是否可見，選擇執行 then[] 或 else[]
             # 不叫 LLM、不燒 token — 純 CV template matching（跟 click_image 同一套）
@@ -2045,6 +2179,10 @@ def execute_action(
             from .uia_executor import element_exists
             found = element_exists(action.get("window") or uia_window, cdef,
                                    rect=action.get("rect"), timeout=timeout)
+            if found:
+                # 剛彈出的對話框有開場動畫,立刻點擊會被吃掉(回報成功卻沒生效,
+                # 實測踩過) —— 偵測到就先讓它站穩再跑 then 分支。
+                time.sleep(0.5)
             branch = action.get("then", []) if found else action.get("else", [])
             branch = branch or []
             branch_label = "then" if found else "else"

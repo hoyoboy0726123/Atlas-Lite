@@ -811,6 +811,10 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         ? `若「${a.control?.name || a.control?.auto_id || '元素'}」出現 → ${(a.then || []).length} 個子動作，否則 ${(a.else || []).length} 個`
                         : a.type === 'wait_download'
                         ? `等下載完成：${a.pattern || '*'}${a.save_as ? ` → {{${a.save_as}}}` : ''}`
+                        : a.type === 'wait_text'
+                        ? `等文字「${a.text || ''}」${a.until === 'disappear' ? '消失' : '出現'}(OCR)`
+                        : a.type === 'if_text_found'
+                        ? `若讀到「${a.text || ''}」→ ${(a.then || []).length} 個子動作，否則 ${(a.else || []).length} 個(OCR)`
                         : a.type === 'uia_wait'
                         ? `等「${a.control?.name || a.control?.auto_id || '目標'}」${a.until === 'disappear' ? '消失' : a.until === 'text_contains' ? `文字含「${a.text || ''}」` : a.until === 'text_equals' ? `文字=「${a.text || ''}」` : '出現'}`
                         : a.type === 'uia_send_keys' && a.text
@@ -1521,6 +1525,13 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'wait_text') {
+    rows.push(input('文字', 'text', '例：資料處理中'))
+    rows.push(input('條件(until)', 'until', 'appear / disappear'))
+    rows.push(input('逾時秒數', 'timeout_sec', '60'))
+  } else if (t === 'if_text_found') {
+    rows.push(input('文字', 'text', '例：查無資料'))
+    rows.push(input('探測秒數', 'timeout_sec', '3'))
   } else if (t === 'if_element_found') {
     rows.push(input('探測秒數', 'timeout_sec', '3'))
     rows.push(input('視窗', 'window', '例：*SCM Portal*'))

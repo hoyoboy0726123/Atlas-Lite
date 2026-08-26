@@ -996,7 +996,10 @@ function UiaActionPicker({
                 ...(element.auto_id ? { auto_id: element.auto_id } : {}),
               }
               const thenActs: ComputerUseAction[] = ifThen === 'click'
-                ? [{ type: 'uia_click', control, description: `點擊「${element.name || element.type}」` }]
+                ? [{ type: 'uia_click', control, description: `點擊「${element.name || element.type}」` },
+                   // 剛彈出的對話框會吃掉點擊(回報成功卻沒關)——點完必須驗證它真的消失
+                   { type: 'uia_wait', control, until: 'disappear', timeout_sec: 5,
+                     description: `等「${element.name || element.type}」消失(確認真的按掉)` }]
                 : []
               const elseActs: ComputerUseAction[] = ifElse === 'download'
                 ? [{ type: 'wait_download', pattern: ifDlPattern.trim() || '*',
