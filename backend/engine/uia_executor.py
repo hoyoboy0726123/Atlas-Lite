@@ -621,6 +621,74 @@ def execute_uia_action(action: dict, step_window: str,
             note = f"、回讀驗證 {got.strip()!r}" if got else "、無法回讀驗證(控制項沒有 ValuePattern)"
             return UiaActionResult(True, f"已選「{option}」via {via}{note}")
 
+        elif atype == "uia_wait":
+            # 等「畫面出現某個東西」才繼續 —— 查詢時間不固定時取代寫死的 wait 秒數。
+            # until:
+            #   appear        目標元素出現(預設)
+            #   disappear     目標元素消失(等「查詢中…」遮罩收掉最常用)
+            #   text_contains 目標元素的文字包含 text(等結果區出現「已匯出」等關鍵字)
+            #   text_equals   目標元素的文字等於 text
+            until = (action.get("until") or "appear").strip()
+            timeout = float(action.get("timeout_sec", 60))
+            raw_txt = action.get("text", "")
+            want = _substitute_vars(raw_txt, variables) if isinstance(raw_txt, str) else str(raw_txt)
+            want = want.strip()
+            if until in ("text_contains", "text_equals") and not want:
+                return UiaActionResult(False, f"uia_wait until={until} 需要 text(要等的關鍵字)")
+            if until not in ("appear", "disappear", "text_contains", "text_equals"):
+                return UiaActionResult(False, f"uia_wait 不認得 until={until!r}"
+                                              "(可用:appear/disappear/text_contains/text_equals)")
+            cdef = action.get("control") or {}
+
+            def _read_text(c):
+                # 與 uia_get_text 同邏輯:Value → LegacyIAccessible → Name
+                for _pid_name in ("ValuePattern", "LegacyIAccessiblePattern"):
+                    _pid = getattr(getattr(auto, "PatternId", None), _pid_name, None)
+                    if _pid is None:
+                        continue
+                    try:
+                        _p = c.GetPattern(_pid)
+                        _v = getattr(_p, "Value", None) if _p else None
+                        if _v:
+                            return str(_v)
+                    except Exception:
+                        pass
+                return c.Name or ""
+
+            t_start = time.time()
+            last_txt = None
+            poll_n = 0
+            while time.time() - t_start < timeout:
+                # 每輪重找 —— 元素會出現/消失,拿舊 reference 會 stale
+                ctrl = _find_control(auto, win, cdef, fallback_rect=action.get("rect"))
+                exists = bool(ctrl) and ctrl.Exists(0, 0)
+                elapsed = time.time() - t_start
+                if until == "appear" and exists:
+                    return UiaActionResult(True, f"目標已出現、等了 {elapsed:.1f}s")
+                if until == "disappear" and not exists:
+                    return UiaActionResult(True, f"目標已消失、等了 {elapsed:.1f}s")
+                if until in ("text_contains", "text_equals") and exists:
+                    cur = _read_text(ctrl)
+                    last_txt = cur
+                    hit = (want in cur) if until == "text_contains" else (cur.strip() == want)
+                    if hit:
+                        return UiaActionResult(True,
+                            f"文字符合「{want}」、等了 {elapsed:.1f}s(實際:{cur[:60]!r})")
+                poll_n += 1
+                if poll_n % 8 == 0:
+                    # Edge a11y 樹冷掉時元素「看起來」不存在 —— 定期實際列舉
+                    # 子元素逼它重建,避免結果早就出來了卻等到超時。
+                    try:
+                        win.GetChildren()
+                    except Exception:
+                        pass
+                time.sleep(0.4)
+            detail = f"、最後讀到 {last_txt[:60]!r}" if last_txt is not None else ""
+            return UiaActionResult(False,
+                f"等了 {timeout:.0f}s 條件仍未成立(until={until}"
+                + (f"、text=「{want}」" if want else "") + f"){detail}。"
+                "查詢比預期久的話調大 timeout_sec")
+
         elif atype == "uia_set_clipboard":
             # 把文字塞進 Windows 剪貼簿、給後續 Ctrl+V 用、跨步驟 / 跨節點傳值用
             # 文字支援 {{變數}} 替換(get_text / get_table_rowcount 存的變數都能用)

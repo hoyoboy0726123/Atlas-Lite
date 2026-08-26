@@ -27,7 +27,7 @@ web_crawler / mcp —— 全部依賴雲端 LLM，Atlas-Lite 不帶。
       - name: 產報表
         batch: python report.py
 """
-from typing import Optional
+from typing import Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -151,7 +151,7 @@ class ComputerUseAction(BaseModel):
     then: list[dict] = []
     else_: list[dict] = Field(default_factory=list, alias="else")
     do: list[dict] = []                # retry_until：要反覆執行的動作
-    until: Optional[dict] = None       # retry_until：檢查條件
+    until: Optional[Union[dict, str]] = None  # retry_until：檢查條件(dict) / uia_wait：appear、disappear、text_contains、text_equals(str)
     max_attempts: int = 3
     wait_between_sec: float = 1.0
 

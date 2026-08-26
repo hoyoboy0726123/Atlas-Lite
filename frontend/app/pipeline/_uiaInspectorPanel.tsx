@@ -115,6 +115,8 @@ function describeAction(
       return `關閉視窗「${target}」`
     case 'uia_select':
       return `選「${target}」→ ${txt || '?'}`
+    case 'uia_wait':
+      return `等「${target}」${(extra as any).until === 'disappear' ? '消失' : (extra as any).until === 'text_contains' ? `文字含「${txt}」` : (extra as any).until === 'text_equals' ? `文字=「${txt}」` : '出現'}`
     case 'uia_set_clipboard':
       return `寫剪貼簿 ← ${txt || ''}`
     default:
@@ -749,6 +751,9 @@ function UiaActionPicker({
   const [colInput, setColInput] = useState<string>('')
   const [clipboardInput, setClipboardInput] = useState<string>('')
   const [optionInput, setOptionInput] = useState('')
+  const [waitUntil, setWaitUntil] = useState('appear')
+  const [waitText, setWaitText] = useState('')
+  const [waitTimeout, setWaitTimeout] = useState('60')
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const isGrid = ['DataGrid', 'List', 'Tree', 'Table'].some(s => element.type.includes(s))
@@ -891,6 +896,55 @@ function UiaActionPicker({
           </div>
         </div>
       )}
+
+      {/* 等待條件:查詢時間不固定時,等畫面出現/消失/文字符合才繼續 */}
+      <div className="bg-amber-50/60 border border-amber-200 rounded p-2 space-y-1">
+        <div className="text-[11px] font-semibold text-amber-700">⏳ 等待這個元素（查詢時間不固定用）</div>
+        <div className="flex gap-1 items-center flex-wrap">
+          <select
+            value={waitUntil}
+            onChange={e => setWaitUntil(e.target.value)}
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs"
+          >
+            <option value="appear">出現</option>
+            <option value="disappear">消失</option>
+            <option value="text_contains">文字包含…</option>
+            <option value="text_equals">文字等於…</option>
+          </select>
+          {(waitUntil === 'text_contains' || waitUntil === 'text_equals') && (
+            <input
+              value={waitText}
+              onChange={e => setWaitText(e.target.value)}
+              placeholder="關鍵字，例：已匯出"
+              className="flex-1 min-w-[100px] border border-gray-200 rounded px-2 py-1 text-xs"
+            />
+          )}
+          <input
+            value={waitTimeout}
+            onChange={e => setWaitTimeout(e.target.value)}
+            className="w-14 border border-gray-200 rounded px-2 py-1 text-xs text-right"
+            title="最多等幾秒"
+          />
+          <span className="text-[10px] text-gray-400">秒</span>
+          <button
+            onClick={() => {
+              if ((waitUntil === 'text_contains' || waitUntil === 'text_equals') && !waitText.trim()) {
+                toast.error('請填要等的關鍵字'); return
+              }
+              const extra: Record<string, unknown> = { until: waitUntil, timeout_sec: Number(waitTimeout) || 60 }
+              if (waitText.trim()) extra.text = waitText.trim()
+              onAdd('uia_wait', extra)
+            }}
+            className="shrink-0 whitespace-nowrap px-2 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 transition-colors"
+          >
+            ⏳ 加入等待
+          </button>
+        </div>
+        <div className="text-[10px] text-amber-700/70">
+          例：按查詢後等「查詢中」遮罩<b>消失</b>、或等結果區<b>文字包含</b>「已匯出」再做下一步。
+          條件不成立會等到逾時才誠實失敗。
+        </div>
+      </div>
 
       {/* 選到唯讀 Text 時要指路 —— 實測使用者選了「找補金額」的 TextControl
           （標籤），找不到填值入口，以為系統做不到。欄位清單裡同名的

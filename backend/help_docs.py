@@ -142,6 +142,10 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   分頁數一變就找不到。
 - 跨視窗流程：各動作自帶 window（讀 A 視窗、填 B 視窗）。
 - 讀值選「裝著值的元素」（Edit），不是標籤 Text；填值走 ValuePattern 不經輸入法。
+- 查詢/匯出時間不固定時用 `uia_wait` 等畫面狀態，不要寫死 wait 秒數：
+  `{type: uia_wait, control: {auto_id: loading}, until: disappear, timeout_sec: 120}`（等「查詢中」遮罩消失）
+  `{type: uia_wait, control: {auto_id: result}, until: text_contains, text: "已匯出", timeout_sec: 120}`
+  until 可用 appear / disappear / text_contains / text_equals；逾時誠實失敗。
 - 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：
   `{type: uia_select, control: {type: ComboBoxControl, auto_id: month}, text: "{{ now.month }}"}`
   背景 pattern 選取 + 回讀驗證，選項文字要一字不差（08 不是 8）。

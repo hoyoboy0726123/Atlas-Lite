@@ -790,6 +790,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                         ? `讀「${a.control?.name || a.control?.auto_id || '控制項'}」→ {{${a.save_as}}}`
                         : a.type === 'uia_select' && a.text
                         ? `選「${a.control?.name || a.control?.auto_id || '下拉'}」→ ${a.text}`
+                        : a.type === 'uia_wait'
+                        ? `等「${a.control?.name || a.control?.auto_id || '目標'}」${a.until === 'disappear' ? '消失' : a.until === 'text_contains' ? `文字含「${a.text || ''}」` : a.until === 'text_equals' ? `文字=「${a.text || ''}」` : '出現'}`
                         : a.type === 'uia_send_keys' && a.text
                           ? `填入「${a.control?.name || a.control?.auto_id || '控制項'}」← ${a.text}`
                           : a.description
@@ -1491,6 +1493,10 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'uia_wait') {
+    rows.push(input('條件(until)', 'until', 'appear / disappear / text_contains / text_equals'))
+    rows.push(input('關鍵字(text_*用)', 'text', '例：已匯出'))
+    rows.push(input('逾時秒數', 'timeout_sec', '60'))
   } else if (t === 'uia_select') {
     rows.push(input('選項文字', 'text', '例：08 或 {{ now.month }}'))
     rows.push(input('視窗', 'window', '例：*E-Quote*'))
