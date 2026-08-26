@@ -296,9 +296,24 @@ def build_context(*, step_results=None, input_params=None,
                     f"`output.<欄位>` 用你的值；步驟本身的值請用 `output.step.<欄位>`。")
             steps_ns[sr.step_name] = {"output": out}
 
+    # now 命名空間:排程報表最常見的需求是「選當月 / 上個月」。
+    # 沒有它,使用者得為了拿個月份多寫一個 script 步驟。
+    # month 等欄位是**補零字串**(08 不是 8) —— 下拉選單的選項文字就是這樣,
+    # 拿去 uia_select 直接對得上;要算術再 |int。
+    from datetime import date as _date
+    _t = _date.today()
+    _pm_y, _pm_m = (_t.year, _t.month - 1) if _t.month > 1 else (_t.year - 1, 12)
+    _nm_y, _nm_m = (_t.year, _t.month + 1) if _t.month < 12 else (_t.year + 1, 1)
+    _now_ns = {
+        "year": str(_t.year), "month": f"{_t.month:02d}", "day": f"{_t.day:02d}",
+        "date": _t.isoformat(),                    # 2026-08-24
+        "prev_month": f"{_pm_m:02d}", "prev_month_year": str(_pm_y),
+        "next_month": f"{_nm_m:02d}", "next_month_year": str(_nm_y),
+    }
     ctx: dict[str, Any] = {
         "steps": steps_ns,
         "input": dict(input_params or {}),
+        "now": _now_ns,
     }
     if env_passthrough:
         # 把整份 os.environ 暴露;secrets 之後另開 namespace,不直接讀環境變數

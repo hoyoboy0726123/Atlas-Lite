@@ -788,6 +788,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                     {(() => {
                       const dyn = a.type === 'uia_get_text' && a.save_as
                         ? `讀「${a.control?.name || a.control?.auto_id || '控制項'}」→ {{${a.save_as}}}`
+                        : a.type === 'uia_select' && a.text
+                        ? `選「${a.control?.name || a.control?.auto_id || '下拉'}」→ ${a.text}`
                         : a.type === 'uia_send_keys' && a.text
                           ? `填入「${a.control?.name || a.control?.auto_id || '控制項'}」← ${a.text}`
                           : a.description
@@ -1489,6 +1491,9 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'uia_select') {
+    rows.push(input('選項文字', 'text', '例：08 或 {{ now.month }}'))
+    rows.push(input('視窗', 'window', '例：*E-Quote*'))
   } else if (t === 'uia_send_keys') {
     rows.push(input('填入文字', 'text', '例：{{總計金額}}'))
     rows.push(input('視窗', 'window', '例：*OCR取值測試靶*'))

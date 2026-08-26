@@ -498,6 +498,105 @@ def execute_uia_action(action: dict, step_window: str,
                 time.sleep(0.3)
             return UiaActionResult(False, f"等 {timeout}s 控制項仍未 enabled")
 
+        elif atype == "uia_select":
+            # 下拉選單（ComboBox / HTML <select>）選指定選項。
+            # 為什麼要專用動作：點開下拉再點選項的錄製回放對「彈出清單」很脆
+            # （清單是暫時元素、位置會漂）；走 UIA pattern 是背景操作、不動滑鼠。
+            # 選項文字支援 {{變數}} —— 搭配 {{ input.月份 }} / {{ now.month }}
+            # 就能「這次選 08、下次選 09」或「永遠選當月」。
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            if not ctrl or not ctrl.Exists(2, 0.5):
+                return UiaActionResult(False, f"找不到下拉選單:{action.get('control')}")
+            raw_opt = action.get("text", "")
+            option = _substitute_vars(raw_opt, variables) if isinstance(raw_opt, str) else str(raw_opt)
+            option = option.strip()
+            if not option:
+                return UiaActionResult(False, "uia_select 缺 text（要選的選項文字，例:08）")
+
+            def _get_pat(c, pat_name):
+                try:
+                    pid = getattr(getattr(auto, "PatternId", None), pat_name, None)
+                    return c.GetPattern(pid) if pid is not None else None
+                except Exception:
+                    return None
+
+            # 策略 1:不展開直接找選項（Edge 的 HTML <select> 收合時
+            # 子 ListItem 也在 accessibility tree 裡）→ SelectionItemPattern.Select()
+            # 全程背景、不彈清單、不動滑鼠。
+            # 策略 2:ExpandCollapse 展開後再找（原生 app 的 ComboBox 常要展開才生子項）。
+            item = None
+            via = ""
+            expanded = False
+            for attempt in ("collapsed", "expanded"):
+                if attempt == "expanded":
+                    ecp = _get_pat(ctrl, "ExpandCollapsePattern")
+                    if not ecp:
+                        break
+                    try:
+                        ecp.Expand()
+                        expanded = True
+                        time.sleep(0.4)   # 給清單 render 時間
+                    except Exception as _e:
+                        logger.debug(f"[uia] Expand 失敗:{_e}")
+                        break
+                try:
+                    cand = ctrl.ListItemControl(Name=option, searchDepth=8)
+                    if cand.Exists(1, 0.2):
+                        item = cand
+                        break
+                except Exception:
+                    pass
+                # 展開後的清單可能掛在視窗層而不是 combo 底下（原生 app 常見）
+                if attempt == "expanded" and win is not None:
+                    try:
+                        cand = win.ListItemControl(Name=option, searchDepth=30)
+                        if cand.Exists(1, 0.2):
+                            item = cand
+                            break
+                    except Exception:
+                        pass
+            if item is None:
+                if expanded:
+                    try:
+                        _get_pat(ctrl, "ExpandCollapsePattern").Collapse()
+                    except Exception:
+                        pass
+                return UiaActionResult(
+                    False,
+                    f"下拉選單裡找不到選項「{option}」"
+                    + (f"（原文 {raw_opt!r}、變數替換後）" if raw_opt != option else "")
+                    + "。檢查:選項文字要一字不差（含前導零，08 不是 8）")
+
+            sel = _get_pat(item, "SelectionItemPattern")
+            if sel is not None:
+                sel.Select()
+                via = "SelectionItemPattern"
+            else:
+                item.Click()
+                via = "Click(mouse fallback)"
+            if expanded:
+                try:
+                    _get_pat(ctrl, "ExpandCollapsePattern").Collapse()
+                except Exception:
+                    pass
+
+            # 回讀驗證 —— 「選了」不等於「選對」。ComboBox 的 ValuePattern
+            # 會回當前選中的選項文字，讀得到就核對；讀不到就誠實標註未驗證。
+            time.sleep(0.15)
+            vp = _get_pat(ctrl, "ValuePattern")
+            got = ""
+            try:
+                got = str(getattr(vp, "Value", "") or "") if vp else ""
+            except Exception:
+                got = ""
+            if got and got.strip() != option:
+                return UiaActionResult(
+                    False,
+                    f"選了「{option}」但下拉當前值是「{got.strip()}」—— 沒選上"
+                    f"（via {via}）。可能同名選項在別層、或清單需要更長 render 時間")
+            note = f"、回讀驗證 {got.strip()!r}" if got else "、無法回讀驗證(控制項沒有 ValuePattern)"
+            return UiaActionResult(True, f"已選「{option}」via {via}{note}")
+
         elif atype == "uia_set_clipboard":
             # 把文字塞進 Windows 剪貼簿、給後續 Ctrl+V 用、跨步驟 / 跨節點傳值用
             # 文字支援 {{變數}} 替換(get_text / get_table_rowcount 存的變數都能用)

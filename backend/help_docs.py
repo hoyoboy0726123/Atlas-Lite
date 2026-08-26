@@ -142,6 +142,9 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   分頁數一變就找不到。
 - 跨視窗流程：各動作自帶 window（讀 A 視窗、填 B 視窗）。
 - 讀值選「裝著值的元素」（Edit），不是標籤 Text；填值走 ValuePattern 不經輸入法。
+- 下拉選單用 `uia_select` 動作（text = 選項文字，支援 {{變數}}）：
+  `{type: uia_select, control: {type: ComboBoxControl, auto_id: month}, text: "{{ now.month }}"}`
+  背景 pattern 選取 + 回讀驗證，選項文字要一字不差（08 不是 8）。
 - 點擊三層 fallback：UIA（有 name/auto_id 才可能中）→ CV 錨點圖 → 錄製座標。
   匿名元素（無 name 無 auto_id）純 UIA 必定失敗，要保留 CV 層。
 """
@@ -161,7 +164,13 @@ _DOCS["variables"] = """# 變數與傳值
 
 ## 其他命名空間
 - `{{ secrets.名稱 }}`：加密保險箱（設定頁 Secrets），值不會出現在 log。
-- `{{ input.名稱 }}`：啟動工作流時傳入的參數。
+- `{{ input.名稱 }}`：啟動工作流時傳入的參數 —— 「這次選 08、下次選 09」
+  就是每次啟動帶不同 input。
+- `{{ now.* }}`：當前日期（排程報表選當月用）。全部是補零字串，
+  下拉選單的選項文字直接對得上：
+  `now.year`(2026)、`now.month`(08)、`now.day`、`now.date`(2026-08-24)、
+  `now.prev_month`(07)、`now.next_month`(09)、`now.prev_month_year` / `next_month_year`
+  （跨年時給對應年份）。
 
 ## 常見錯誤（工具會擋，但要知道為什麼）
 - 變數名只能中英數與底線：`40,425` 這種「值當名字」替換不了。

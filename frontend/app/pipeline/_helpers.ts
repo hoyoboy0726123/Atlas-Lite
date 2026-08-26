@@ -92,6 +92,7 @@ export interface ComputerUseAction {
       | 'assert_image' | 'assert_text' | 'activate_window' | 'if_image_found' | 'retry_until'
       | 'uia_click' | 'uia_send_keys' | 'uia_get_text' | 'uia_get_table_rowcount' | 'uia_click_cell'
       | 'uia_wait_enabled' | 'uia_assert_state' | 'uia_close_window' | 'uia_set_clipboard'
+      | 'uia_select'
       | 'ocr_get_text'
   // ── ocr_get_text 專用：讀「標籤旁邊的值」存成變數 ──
   label?: string        // 要找的標籤文字（例：總計金額）

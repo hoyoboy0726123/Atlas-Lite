@@ -113,6 +113,8 @@ function describeAction(
       return `驗證「${target}」${(extra as any).check || ''}`
     case 'uia_close_window':
       return `關閉視窗「${target}」`
+    case 'uia_select':
+      return `選「${target}」→ ${txt || '?'}`
     case 'uia_set_clipboard':
       return `寫剪貼簿 ← ${txt || ''}`
     default:
@@ -746,10 +748,12 @@ function UiaActionPicker({
   const [rowInput, setRowInput] = useState<string>('')
   const [colInput, setColInput] = useState<string>('')
   const [clipboardInput, setClipboardInput] = useState<string>('')
+  const [optionInput, setOptionInput] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const isGrid = ['DataGrid', 'List', 'Tree', 'Table'].some(s => element.type.includes(s))
   const isEditable = ['Edit', 'Document', 'Combo'].some(s => element.type.includes(s))
+  const isCombo = element.type.includes('ComboBox')
 
   return (
     <div className="space-y-2">
@@ -844,6 +848,49 @@ function UiaActionPicker({
           example: '選 [視窗任一元素] → 關閉視窗\nbackend 自動往上找 WindowControl 並 Close()',
         }}
       />
+
+      {/* 下拉選單：選指定選項（背景 pattern、不彈清單、支援 {{變數}}） */}
+      {isCombo && (
+        <div className="bg-violet-50/60 border border-violet-200 rounded p-2 space-y-1">
+          <div className="text-[11px] font-semibold text-violet-700">▾ 選擇選項（下拉選單）</div>
+          <div className="flex gap-1 items-center">
+            <input
+              value={optionInput}
+              onChange={e => setOptionInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && optionInput.trim()) {
+                  onAdd('uia_select', { text: optionInput.trim() })
+                  setOptionInput('')
+                }
+              }}
+              placeholder={'選項文字，例：08 或 {{ now.month }}'}
+              className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+            />
+            <VariableButton
+              workflowId={workflowId}
+              onPick={(p) => {
+                const local = _localizeVarPath(p, stepName)
+                setOptionInput(local === p ? `${optionInput}{{ ${p} }}` : `${optionInput}{{${local}}}`)
+              }}
+            />
+            <button
+              onClick={() => {
+                if (!optionInput.trim()) { toast.error('請填選項文字'); return }
+                onAdd('uia_select', { text: optionInput.trim() })
+                setOptionInput('')
+              }}
+              className="shrink-0 whitespace-nowrap px-2 py-1 bg-violet-600 text-white rounded text-xs flex items-center gap-1 hover:bg-violet-700 transition-colors"
+            >
+              <ListChecks className="w-3 h-3 shrink-0" /> 選取
+            </button>
+          </div>
+          <div className="text-[10px] text-violet-700/70">
+            走 UIA pattern 背景選取 + 回讀驗證，不彈清單不動滑鼠。動態月份可用
+            {' '}{`{{ now.month }}`}（當月）/ {`{{ now.prev_month }}`} / {`{{ input.月份 }}`}。
+            文字要一字不差（08 不是 8）。
+          </div>
+        </div>
+      )}
 
       {/* 選到唯讀 Text 時要指路 —— 實測使用者選了「找補金額」的 TextControl
           （標籤），找不到填值入口，以為系統做不到。欄位清單裡同名的
