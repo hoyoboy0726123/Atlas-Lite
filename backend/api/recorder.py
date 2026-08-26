@@ -616,20 +616,39 @@ async def uia_list_windows():
     except Exception:
         pass
 
-    # Pass 2: win32 EnumWindows(補 cloaked / hidden ApplicationFrameWindow)
+    # Pass 2: EnumWindows(補 cloaked / hidden ApplicationFrameWindow = UWP App)
+    # ⚠ 純 ctypes、不用 pywin32：pywin32 從未進 requirements.txt，另一台機器
+    #   乾淨安裝時這整段被外層 except 靜默跳過 —— 清單看起來正常、只是
+    #   永遠少了 UWP 視窗，沒有任何錯誤訊息。這段本來就在用 ctypes 呼叫
+    #   dwmapi，user32 一起用 ctypes 叫即可，不需要多 30MB 相依。
     try:
-        import win32gui  # type: ignore
         import ctypes
+        from ctypes import wintypes
+
+        _user32 = ctypes.windll.user32
+
+        def _win_text(hwnd, fn_len, fn_get) -> str:
+            n = fn_len(hwnd)
+            if n <= 0:
+                return ""
+            buf = ctypes.create_unicode_buffer(n + 1)
+            fn_get(hwnd, buf, n + 1)
+            return buf.value or ""
 
         def _enum_cb(hwnd, _ignored):
             try:
-                if not win32gui.IsWindowVisible(hwnd):
+                if not _user32.IsWindowVisible(hwnd):
                     return True
-                title = win32gui.GetWindowText(hwnd) or ""
-                cls = win32gui.GetClassName(hwnd) or ""
-                rect = win32gui.GetWindowRect(hwnd)
-                w = rect[2] - rect[0]
-                h = rect[3] - rect[1]
+                title = _win_text(hwnd, _user32.GetWindowTextLengthW,
+                                  _user32.GetWindowTextW)
+                cls_buf = ctypes.create_unicode_buffer(256)
+                _user32.GetClassNameW(hwnd, cls_buf, 256)
+                cls = cls_buf.value or ""
+                r = wintypes.RECT()
+                if not _user32.GetWindowRect(hwnd, ctypes.byref(r)):
+                    return True
+                w = r.right - r.left
+                h = r.bottom - r.top
                 if w < 50 or h < 50:
                     return True
                 # 系統殼有名字才補(避免一堆 noise)
@@ -652,16 +671,19 @@ async def uia_list_windows():
                     pass
                 windows.append({
                     "name": title, "class": cls,
-                    "rect": [rect[0], rect[1], w, h],
+                    "rect": [r.left, r.top, w, h],
                     "is_offscreen": is_cloaked,
                 })
             except Exception:
                 pass
             return True
 
-        win32gui.EnumWindows(_enum_cb, None)
-    except Exception:
-        pass
+        _WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        _user32.EnumWindows(_WNDENUMPROC(_enum_cb), 0)
+    except Exception as _e:
+        # 失敗要留痕跡 —— 原本的靜默 pass 讓「少了 UWP 視窗」完全查不到原因
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"EnumWindows Pass 2 失敗:{_e}")
 
     # 排序:非 cloaked + 有真正 title 優先
     windows.sort(key=lambda x: (

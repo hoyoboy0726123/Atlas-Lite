@@ -504,15 +504,14 @@ def execute_uia_action(action: dict, step_window: str,
             raw = action.get("text", "")
             text = _substitute_vars(raw, variables) if isinstance(raw, str) else str(raw)
             try:
-                import win32clipboard  # type: ignore
-                win32clipboard.OpenClipboard()
-                try:
-                    win32clipboard.EmptyClipboard()
-                    win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-                finally:
-                    win32clipboard.CloseClipboard()
+                # pyperclip 而不是 pywin32：pyperclip 本來就是必要相依
+                # （type_text 的剪貼簿貼上走它），效果相同（CF_UNICODETEXT），
+                # 省掉 30MB 的 pywin32 —— 它從未進 requirements.txt，
+                # 另一台機器乾淨安裝時這個動作直接硬失敗。
+                import pyperclip
+                pyperclip.copy(text)
             except ImportError:
-                return UiaActionResult(False, "pywin32 (win32clipboard) 未安裝、無法寫剪貼簿")
+                return UiaActionResult(False, "pyperclip 未安裝、無法寫剪貼簿（pip install pyperclip）")
             except Exception as e:
                 return UiaActionResult(False, f"寫剪貼簿失敗:{type(e).__name__}: {e}")
             return UiaActionResult(True, f"已寫剪貼簿 {text[:60]!r}({len(text)} 字)")
