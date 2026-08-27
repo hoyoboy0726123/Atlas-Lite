@@ -124,6 +124,39 @@ _ACTION_STR_FIELDS = (
 )
 
 
+def _render_action_dict(d: dict, context: dict) -> None:
+    """In-place render 巢狀動作 dict(for_each.do / then / else 裡的子動作)。
+
+    巢狀動作沒經過 pydantic 轉物件、是原始 dict,欄位覆蓋範圍與
+    _ACTION_STR_FIELDS 對齊,並繼續往更深層的 do/then/else 遞迴
+    (if_element_found 包在 for_each 裡是實際使用的形態)。
+    """
+    for fname in _ACTION_STR_FIELDS + ("items", "save_as", "pattern", "dir"):
+        v = d.get(fname)
+        if isinstance(v, str) and v and "{{" in v:
+            new = render(v, context)
+            if new != v:
+                d[fname] = new
+    ctrl = d.get("control")
+    if isinstance(ctrl, dict):
+        d["control"] = {
+            k: (render(v, context) if isinstance(v, str) and "{{" in v else v)
+            for k, v in ctrl.items()
+        }
+    ks = d.get("keys")
+    if isinstance(ks, list):
+        d["keys"] = [render(k, context) if isinstance(k, str) and "{{" in k else k for k in ks]
+    for nf in ("do", "then", "else"):
+        lst = d.get(nf)
+        if isinstance(lst, list):
+            for sub in lst:
+                if isinstance(sub, dict):
+                    _render_action_dict(sub, context)
+    u = d.get("until")
+    if isinstance(u, dict):
+        _render_action_dict(u, context)
+
+
 def render_step(step, context: dict):
     """In-place render 一個 PipelineStep 的所有字串欄位。
 
@@ -180,6 +213,24 @@ def render_step(step, context: dict):
                     render(k, context) if isinstance(k, str) else k
                     for k in action.keys
                 ]
+            # for_each 的 items(字串型清單來源,例 "{{ input.品規清單 }}")
+            v = getattr(action, "items", None)
+            if isinstance(v, str) and v:
+                new = render(v, context)
+                if new != v:
+                    action.items = new
+            # 巢狀子動作(for_each.do / if_*.then / if_*.else):遞迴 render。
+            # 不做的話「{{ now.year }}」在巢狀裡會以字面字元執行 —— 實測
+            # for_each 裡的 uia_select 就這樣拿「{{ now.year }}」去找選項全滅。
+            for _nf in ("do", "then", "else_"):
+                _lst = getattr(action, _nf, None)
+                if _lst:
+                    for _sub in _lst:
+                        if isinstance(_sub, dict):
+                            _render_action_dict(_sub, context)
+            _u = getattr(action, "until", None)
+            if isinstance(_u, dict):
+                _render_action_dict(_u, context)
 
     # （Atlas 這裡還會 render outlook_params / wc_urls / mcp_args / mcp_tool_args，
     #   那四種節點在 Atlas-Lite 都不存在。）
