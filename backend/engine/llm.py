@@ -391,13 +391,22 @@ def _ollama_chat(cfg: dict, messages: list[dict], temperature: float) -> str:
     import httpx
 
     base = (cfg["base_url"] or "http://localhost:11434").rstrip("/")
+    # num_ctx 一定要明確給:Ollama 預設 4096,agent 的系統提示+工具說明+
+    # 按需載入的文件+長需求輕鬆超過 —— 超過就**靜默截斷最前面**,模型
+    # 失去所有指示開始迷航(實測:小問題正常、大任務永遠「思考中」)。
+    import os as _os
+    try:
+        _num_ctx = int(_os.environ.get("ATLASLITE_OLLAMA_NUM_CTX", "16384"))
+    except ValueError:
+        _num_ctx = 16384
     try:
         with httpx.Client(timeout=_OLLAMA_TIMEOUT) as client:
             r = client.post(f"{base}/api/chat",
                             json={"model": cfg["model"],
                                   "messages": messages,
                                   "stream": False,
-                                  "options": {"temperature": temperature}})
+                                  "options": {"temperature": temperature,
+                                              "num_ctx": _num_ctx}})
     except httpx.ConnectError:
         raise LlmError(f"連不上 Ollama（{base}）—— 先確認 `ollama serve` 有在跑")
     except httpx.TimeoutException:
