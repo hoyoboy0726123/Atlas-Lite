@@ -27,17 +27,16 @@ export default function InsertHub({ expanded, onExpand, onCollapse, children }: 
     )
   }
   return (
-    <>
+    // w-full + flex-wrap:展開的工具塞不進一行就往下排整齊(硬擠會被裁掉,使用者反饋)
+    <div className="w-full flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
       {children}
-      <div className="flex justify-center -my-0.5">
-        <button
-          data-vlm-insert-trigger
-          type="button"
-          onClick={onCollapse}
-          title="收合插入選單"
-          className="opacity-40 hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded-full text-[9px] text-gray-400 border border-dashed border-gray-300 hover:bg-gray-50"
-        >✕</button>
-      </div>
-    </>
+      <button
+        data-vlm-insert-trigger
+        type="button"
+        onClick={onCollapse}
+        title="收合插入選單"
+        className="opacity-40 hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded-full text-[9px] text-gray-400 border border-dashed border-gray-300 hover:bg-gray-50"
+      >✕</button>
+    </div>
   )
 }
