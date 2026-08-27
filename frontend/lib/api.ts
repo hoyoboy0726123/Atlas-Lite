@@ -90,6 +90,27 @@ async function _readErrorDetail(res: Response): Promise<string> {
     return `HTTP ${res.status}`
   }
 }
+/** 套用 YAML 前的後端完整驗證(前端手寫解析器已退役、只用於顯示序列化)。 */
+export async function validateWorkflowYaml(yaml: string): Promise<{ ok: boolean; error?: string; name?: string }> {
+  const res = await fetchWithRetry(`${BASE}/workflows/validate-yaml`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+/** 以 yaml 覆寫 workflow(後端會用完整解析器重建 canvas)、回傳更新後的 workflow。 */
+export async function applyWorkflowYaml(id: string, yaml: string): Promise<{ name: string; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }> {
+  const res = await fetchWithRetry(`${BASE}/workflows/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml }),
+  })
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null))?.detail
+    throw new Error(detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function getHealth(): Promise<{ status: string; warnings: string[] }> {
   const res = await fetch(`${BASE}/health`)
   return res.json()

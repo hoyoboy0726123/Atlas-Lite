@@ -54,6 +54,30 @@ async def api_get_workflow(wf_id: str):
     return wf
 
 
+class YamlValidateRequest(BaseModel):
+    yaml: str
+
+
+@router.post("/workflows/validate-yaml")
+async def api_validate_yaml(req: YamlValidateRequest):
+    """套用 YAML 前的完整驗證(前端 YAML 面板用)。
+
+    為什麼要有這個:前端手寫解析器看不懂的內容會**靜默丟掉**(使用者貼了
+    多行巢狀動作、整個 actions 消失)。改成後端完整解析、錯誤明講、擋在套用前。
+    """
+    from api.runs import _parse_config
+    try:
+        _parse_config(req.yaml)
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:600]}
+    try:
+        data = lenient_yaml_load(req.yaml) or {}
+        name = data.get("name") or ""
+    except Exception:
+        name = ""
+    return {"ok": True, "name": name}
+
+
 @router.put("/workflows/{wf_id}")
 async def api_update_workflow(wf_id: str, req: WorkflowUpdateRequest):
     patch = {k: v for k, v in req.model_dump().items() if v is not None}

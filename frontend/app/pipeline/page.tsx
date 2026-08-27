@@ -40,6 +40,8 @@ import {
   startPipeline, getPipelineRun, resumePipeline, abortPipeline,
   createPipelineSchedule, getPipelineLog, getPipelineRuns,
   deleteComputerUseAssets, openOutputFolder,
+  validateWorkflowYaml,
+  applyWorkflowYaml,
 } from '@/lib/api'
 import type { PipelineRun } from '@/lib/types'
 import { useRunStatusStore } from './_runStatus'
@@ -1033,43 +1035,73 @@ export default function PipelinePage() {
    *  回傳 id 是給 Hero 用的:Hero 建完工作流後要把「當初為什麼這樣設計」的對話
    *  灌進那條工作流。 */
   const importYaml = useCallback(async (yaml: string, mode: 'new' | 'overwrite' = 'overwrite'): Promise<string | null> => {
-    const parsed = parseYaml(yaml)
-    if (!parsed) { toast.error('YAML 格式有誤'); return null }
-    const { nodes: ns, edges: es } = stepsToFlow(parsed.steps)
+    // 改走後端解析(完整 YAML 解析器):一行式與多行巢狀動作都支援。
+    // 先前是前端手寫逐行 parser、只認「- {...} 一行一動作」,多行巢狀會被
+    // **靜默丟掉**(實測整個 actions 消失)。後端驗證失敗會明講哪裡錯、擋在套用前。
+    let v: { ok: boolean; error?: string; name?: string }
+    try {
+      v = await validateWorkflowYaml(yaml)
+    } catch {
+      toast.error('後端無法連線，無法套用 YAML')
+      return null
+    }
+    if (!v.ok) {
+      toast.error(`YAML 有誤，未套用：${v.error || '未知錯誤'}`, { duration: 10000 })
+      return null
+    }
+
+    const loadFromServer = (wf: { name: string; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }) => {
+      const cv = wf.canvas || { nodes: [], edges: [] }
+      savingRef.current = true
+      setPipelineName(wf.name)
+      setNodes((cv.nodes || []) as AppNode[])
+      setEdges((cv.edges || []) as never[])
+      setTimeout(() => { savingRef.current = false }, 800)
+    }
 
     if (mode === 'new') {
       // 名字衝突自動加 " 2" / " 3" …
       const existing = useWorkflowStore.getState().workflows
-      let name = parsed.name || '新工作流'
+      let name = v.name || '新工作流'
       if (existing.some(w => w.name === name)) {
         let i = 2
         while (existing.some(w => w.name === `${name} ${i}`)) i++
         name = `${name} ${i}`
       }
       const newId = await createWorkflow(name)   // store 會把 activeId 切到新 workflow
-      // activeId useEffect 會在 30ms 後把（剛建立的空）新 workflow 載入畫布，
-      // 所以我們要晚於它才寫入，不然會被空畫布覆蓋
-      setTimeout(() => {
-        setPipelineName(name)
-        setNodes(ns)
-        setEdges(es)
-        // activeId useEffect 會把 savingRef 卡住 ~1s，這段時間 autoSave 被 block，
-        // 所以新工作流內容無法自動存進後端 → 直接手動 saveCanvas 一次（含 yaml）
-        const importedYaml = stepsToYaml(name, flowToSteps(ns as AppNode[], es))
-        saveCanvas(newId, ns as AppNode[], es, importedYaml)
-      }, 120)
+      try {
+        const wf = await applyWorkflowYaml(newId, yaml)
+        // activeId useEffect 會在 30ms 後把（剛建立的空）新 workflow 載入畫布，
+        // 晚於它才寫入、不然會被空畫布覆蓋
+        setTimeout(() => {
+          loadFromServer({ ...wf, name })
+          const cv = wf.canvas || { nodes: [], edges: [] }
+          saveCanvas(newId, (cv.nodes || []) as AppNode[], (cv.edges || []) as never[], yaml)
+        }, 150)
+      } catch (e) {
+        toast.error(`套用失敗：${e instanceof Error ? e.message : String(e)}`)
+        return null
+      }
       toast.success(`已建立新工作流「${name}」`)
       setShowYaml(false)
       return newId
     } else {
-      setPipelineName(parsed.name)
-      setNodes(ns)
-      setEdges(es)
-      toast.success('已覆蓋目前工作流')
+      if (!activeId) { toast.error('沒有選取的工作流'); return null }
+      try {
+        const wf = await applyWorkflowYaml(activeId, yaml)
+        loadFromServer(wf)
+        // 同步 store + 後端 —— store 裡的舊 nodes 不更新的話,切走再切回來會變回舊內容
+        const cv = wf.canvas || { nodes: [], edges: [] }
+        saveCanvas(activeId, (cv.nodes || []) as AppNode[], (cv.edges || []) as never[], yaml)
+        toast.success('已套用')
+      } catch (e) {
+        toast.error(`套用失敗：${e instanceof Error ? e.message : String(e)}`)
+        return null
+      }
     }
     setShowYaml(false)
     return null
-  }, [setNodes, setEdges, createWorkflow, saveCanvas])
+  }, [setNodes, setEdges, createWorkflow, saveCanvas, activeId])
 
   // ── Run pipeline ──────────────────────────────────────────────────────────
   const handleRunClick = async () => {
