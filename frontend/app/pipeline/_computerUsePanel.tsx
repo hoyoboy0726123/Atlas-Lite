@@ -79,6 +79,12 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     onUpdate({ actions: [{ ...fe, do: [...(data.actions || [])] }] })
   }
 
+  /** 把「index 之後」的動作包進迴圈,前面的(錄製/讀清單等前置)保留在外。 */
+  const wrapAfterIntoForEach = (index: number, fe: ComputerUseAction) => {
+    const acts = data.actions || []
+    onUpdate({ actions: [...acts.slice(0, index), { ...fe, do: acts.slice(index) }] })
+  }
+
   // 點面板其他地方就關掉 popover（不然它會一直蓋在動作列表上）
   useEffect(() => {
     if (insertOpenAt === null) return
@@ -670,10 +676,12 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   index={0}
                   isOpen={feOpenAt === 0}
                   hasActions={(data.actions || []).length > 0}
+                  tailCount={Math.max(0, (data.actions || []).length - (0))}
                   openMenu={() => setFeOpenAt(0)}
                   closeMenu={() => setFeOpenAt(null)}
                   onInsert={insertActionAt}
                   onWrapAll={wrapAllIntoForEach}
+                  onWrapAfter={wrapAfterIntoForEach}
                 />
               <ClipboardReadInserter
                   index={0}
@@ -724,10 +732,12 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       index={i}
                       isOpen={feOpenAt === i}
                       hasActions={(data.actions || []).length > 0}
+                      tailCount={Math.max(0, (data.actions || []).length - (i))}
                       openMenu={() => setFeOpenAt(i)}
                       closeMenu={() => setFeOpenAt(null)}
                       onInsert={insertActionAt}
                       onWrapAll={wrapAllIntoForEach}
+                      onWrapAfter={wrapAfterIntoForEach}
                     />
                   <ClipboardReadInserter
                       index={i}
@@ -1323,10 +1333,12 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   index={data.actions.length}
                   isOpen={feOpenAt === data.actions.length}
                   hasActions={(data.actions || []).length > 0}
+                  tailCount={Math.max(0, (data.actions || []).length - (data.actions.length))}
                   openMenu={() => setFeOpenAt(data.actions.length)}
                   closeMenu={() => setFeOpenAt(null)}
                   onInsert={insertActionAt}
                   onWrapAll={wrapAllIntoForEach}
+                  onWrapAfter={wrapAfterIntoForEach}
                 />
               <ClipboardReadInserter
                   index={data.actions.length}
@@ -1717,6 +1729,31 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   } else if (t === 'assert_text' || t === 'wait_image') {
     if ('ocr_text' in action) rows.push(input('目標文字', 'ocr_text' as any, ''))
     if (t === 'wait_image') rows.push(input('條件(until)', 'until' as any, 'appear / disappear(等消失)'))
+  }
+
+  // uia 動作的目標元素(control)欄位 —— 之前只能「刪掉重選」,萬用字元
+  // name(資料處理中*)這種微調逼人重抓一次元素,直接開放改。
+  if (t.startsWith('uia_') && action.control && t !== 'uia_get_clipboard') {
+    rows.push(
+      <div key="ctl-name" className="flex items-center gap-1.5">
+        <span className="text-[10px] text-gray-500 w-14 shrink-0 text-right">目標 name</span>
+        <input
+          value={String((action.control as Record<string, unknown>)?.name ?? '')}
+          onChange={e => onPatch({ control: { ...(action.control || {}), name: e.target.value } } as any)}
+          placeholder="支援 * 萬用字元，例：資料處理中*"
+          className="flex-1 min-w-0 border border-indigo-200 rounded px-2 py-1 text-xs font-mono"
+        />
+      </div>,
+      <div key="ctl-aid" className="flex items-center gap-1.5">
+        <span className="text-[10px] text-gray-500 w-14 shrink-0 text-right">目標 id</span>
+        <input
+          value={String((action.control as Record<string, unknown>)?.auto_id ?? '')}
+          onChange={e => onPatch({ control: { ...(action.control || {}), auto_id: e.target.value } } as any)}
+          placeholder="auto_id（沒有就留空）"
+          className="flex-1 min-w-0 border border-indigo-200 rounded px-2 py-1 text-xs font-mono"
+        />
+      </div>,
+    )
   }
 
   return (

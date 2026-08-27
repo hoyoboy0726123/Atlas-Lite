@@ -1,10 +1,10 @@
 'use client'
 /**
  * 逐筆迴圈插入器 —— 建立 for_each 動作。
- * 主要模式是「把目前序列的全部動作包進迴圈」:實務流程是先把單筆調通,
- * 再一鍵包成逐筆;清單用多行 textarea 貼(一行一筆,Excel 直行直接貼)。
+ * 三種範圍:包「此位置之後」的動作(前面有錄製/讀剪貼簿等前置時用)、
+ * 包全部、空迴圈。清單用多行 textarea 貼(一行一筆,Excel 直行直接貼)。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Repeat } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ComputerUseAction } from './_helpers'
@@ -13,17 +13,27 @@ interface Props {
   index: number
   isOpen: boolean
   hasActions: boolean
+  /** 此插入點之後有幾個動作(wrapAfter 的範圍) */
+  tailCount: number
   openMenu: () => void
   closeMenu: () => void
   onInsert: (index: number, action: ComputerUseAction) => void
   onWrapAll: (action: ComputerUseAction) => void
+  onWrapAfter: (index: number, action: ComputerUseAction) => void
 }
 
-export default function ForEachInserter({ index, isOpen, hasActions, openMenu, closeMenu, onInsert, onWrapAll }: Props) {
+export default function ForEachInserter({ index, isOpen, hasActions, tailCount, openMenu, closeMenu, onInsert, onWrapAll, onWrapAfter }: Props) {
   const [items, setItems] = useState('')
   const [saveAs, setSaveAs] = useState('品規')
   const [cont, setCont] = useState(true)
-  const [mode, setMode] = useState<'wrap' | 'empty'>('wrap')
+  const [mode, setMode] = useState<'wrapAfter' | 'wrap' | 'empty'>('wrap')
+  // 開啟時依位置挑預設:中間的插入點 → 包之後;最前面 → 包全部;沒動作 → 空迴圈
+  useEffect(() => {
+    if (isOpen) {
+      setMode(tailCount > 0 && index > 0 ? 'wrapAfter' : hasActions ? 'wrap' : 'empty')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
 
   const submit = () => {
     if (!items.trim()) { toast.error('請貼清單（或填 {{變數}}）'); return }
@@ -36,9 +46,12 @@ export default function ForEachInserter({ index, isOpen, hasActions, openMenu, c
       do: [],
       description: `逐筆迴圈 → {{${saveAs.trim()}}}`,
     }
-    if (mode === 'wrap' && hasActions) {
+    if (mode === 'wrapAfter' && tailCount > 0) {
+      onWrapAfter(index, fe)
+      toast.success(`已把之後的 ${tailCount} 個動作包進迴圈 — 記得把「填值」動作的文字改成 {{${saveAs.trim()}}}`, { duration: 8000 })
+    } else if (mode === 'wrap' && hasActions) {
       onWrapAll(fe)
-      toast.success(`已把現有動作包進迴圈 — 記得把「填值」動作的文字改成 {{${saveAs.trim()}}}`, { duration: 8000 })
+      toast.success(`已把全部動作包進迴圈 — 記得把「填值」動作的文字改成 {{${saveAs.trim()}}}`, { duration: 8000 })
     } else {
       onInsert(index, fe)
       toast.success('已插入空迴圈 — 子動作用 YAML 或 AI 助手放進 do:')
@@ -72,7 +85,7 @@ export default function ForEachInserter({ index, isOpen, hasActions, openMenu, c
       </div>
       <label className="block">
         <span className="text-[10px] text-gray-500">
-          {'清單（一行一筆，可從 Excel 直行貼上；清單在別的視窗時填 {{變數}}，先用「讀文字」抓下來）'}
+          {'清單（一行一筆，可從 Excel 直行貼上；清單在別的視窗時填 {{變數}}，先用「讀文字」/「讀剪貼簿」抓下來）'}
         </span>
         <textarea
           value={items}
@@ -95,13 +108,19 @@ export default function ForEachInserter({ index, isOpen, hasActions, openMenu, c
       </div>
       <div className="space-y-0.5 text-[10px] text-gray-600">
         <label className="flex items-center gap-1 cursor-pointer">
-          <input type="radio" checked={mode === 'wrap'} onChange={() => setMode('wrap')} disabled={!hasActions} />
-          <span className={hasActions ? '' : 'opacity-40'}>
-            把目前序列的<b>全部動作</b>包進迴圈（先調通單筆再套迴圈，推薦）
+          <input type="radio" checked={mode === 'wrapAfter'} onChange={() => setMode('wrapAfter')} disabled={tailCount === 0} />
+          <span className={tailCount > 0 ? '' : 'opacity-40'}>
+            把這個位置<b>之後的 {tailCount} 個動作</b>包進迴圈（前面有錄製/讀清單等前置時用）
           </span>
         </label>
         <label className="flex items-center gap-1 cursor-pointer">
-          <input type="radio" checked={mode === 'empty' || !hasActions} onChange={() => setMode('empty')} />
+          <input type="radio" checked={mode === 'wrap'} onChange={() => setMode('wrap')} disabled={!hasActions} />
+          <span className={hasActions ? '' : 'opacity-40'}>
+            把目前序列的<b>全部動作</b>包進迴圈
+          </span>
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input type="radio" checked={mode === 'empty'} onChange={() => setMode('empty')} />
           建立空迴圈，插入在此位置（子動作之後用 YAML / AI 助手放進去）
         </label>
       </div>
