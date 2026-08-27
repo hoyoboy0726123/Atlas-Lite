@@ -5,6 +5,7 @@ import WaitDownloadInserter from './_waitDownloadInserter'
 import OcrWaitInserter from './_ocrWaitInserter'
 import ForEachInserter from './_forEachInserter'
 import ClipboardReadInserter from './_clipboardReadInserter'
+import WakeWindowInserter from './_wakeWindowInserter'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -61,6 +62,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [ocrWaitOpenAt, setOcrWaitOpenAt] = useState<number | null>(null)
   const [feOpenAt, setFeOpenAt] = useState<number | null>(null)
   const [crOpenAt, setCrOpenAt] = useState<number | null>(null)
+  const [wakeOpenAt, setWakeOpenAt] = useState<number | null>(null)
 
   /** 在 index 位置插入一個動作。 */
   const insertActionAt = (index: number, action: ComputerUseAction) => {
@@ -676,6 +678,14 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setCrOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <WakeWindowInserter
+                  index={0}
+                  isOpen={wakeOpenAt === 0}
+                  defaultTitle={data.uiaWindow || ''}
+                  openMenu={() => setWakeOpenAt(0)}
+                  closeMenu={() => setWakeOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </>
           ) : (
             <div className="space-y-1.5">
@@ -718,6 +728,14 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       isOpen={crOpenAt === i}
                       openMenu={() => setCrOpenAt(i)}
                       closeMenu={() => setCrOpenAt(null)}
+                      onAdd={insertActionAt}
+                    />
+                  <WakeWindowInserter
+                      index={i}
+                      isOpen={wakeOpenAt === i}
+                      defaultTitle={data.uiaWindow || ''}
+                      openMenu={() => setWakeOpenAt(i)}
+                      closeMenu={() => setWakeOpenAt(null)}
                       onAdd={insertActionAt}
                     />
                   <button type="button"
@@ -1309,6 +1327,14 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setCrOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              <WakeWindowInserter
+                  index={data.actions.length}
+                  isOpen={wakeOpenAt === data.actions.length}
+                  defaultTitle={data.uiaWindow || ''}
+                  openMenu={() => setWakeOpenAt(data.actions.length)}
+                  closeMenu={() => setWakeOpenAt(null)}
+                  onAdd={insertActionAt}
+                />
             </div>
           )}
         </div>
@@ -1609,6 +1635,8 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
   if (t === 'uia_get_text' || t === 'uia_get_table_rowcount') {
     rows.push(input('變數名', 'save_as', '例：總計金額'))
     rows.push(input('視窗', 'window', '例：*BK簽呈*（留空＝用節點視窗）'))
+  } else if (t === 'activate_window') {
+    rows.push(input('標題關鍵字', 'title_contains' as any, '例：E-Quote測試靶'))
   } else if (t === 'uia_get_clipboard') {
     rows.push(input('存到變數', 'save_as', '例：清單原文'))
   } else if (t === 'for_each') {
