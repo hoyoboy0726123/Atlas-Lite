@@ -6,6 +6,7 @@ import OcrWaitInserter from './_ocrWaitInserter'
 import ForEachInserter from './_forEachInserter'
 import ClipboardReadInserter from './_clipboardReadInserter'
 import WakeWindowInserter from './_wakeWindowInserter'
+import InsertHub from './_insertHub'
 import AskAiButton from './_askAiButton'
 import Link from 'next/link'
 import { X, Circle, Square as StopIcon, Play, Trash2, ChevronUp, ChevronDown, Pencil, Plus, MousePointer2 } from 'lucide-react'
@@ -57,6 +58,8 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
   const [cvOpen, setCvOpen] = useState(false)
   // ➕ 插入點:用「要插在哪個 index」表示開哪一個 popover（actions.length = 插在最後）
   const [insertOpenAt, setInsertOpenAt] = useState<number | null>(null)
+  // 插入選單收折:一次只展開一個間隙(7 顆全常駐太擠,使用者反饋)
+  const [gapOpenAt, setGapOpenAt] = useState<number | null>(null)
   // ⬇ 等下載插入器的開關(與 OCR 插入器同一套 index 邏輯、各自獨立)
   const [dlInsertOpenAt, setDlInsertOpenAt] = useState<number | null>(null)
   const [ocrWaitOpenAt, setOcrWaitOpenAt] = useState<number | null>(null)
@@ -641,6 +644,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
               <p className="text-xs text-gray-400 text-center py-6 border border-dashed border-gray-200 rounded-lg">
                 尚未錄製任何動作
               </p>
+              <InsertHub expanded={gapOpenAt === 0} onExpand={() => setGapOpenAt(0)} onCollapse={() => setGapOpenAt(null)}>
               <OcrFieldInserter
                   index={0}
                   isOpen={insertOpenAt === 0}
@@ -686,6 +690,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setWakeOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              </InsertHub>
             </>
           ) : (
             <div className="space-y-1.5">
@@ -693,6 +698,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                 <div key={i}>
                 {/* 動作前的 ➕ 插入點 */}
                 <div className="flex items-center justify-center gap-2">
+                  <InsertHub expanded={gapOpenAt === i} onExpand={() => setGapOpenAt(i)} onCollapse={() => setGapOpenAt(null)}>
                   <OcrFieldInserter
                     index={i}
                     isOpen={insertOpenAt === i}
@@ -738,6 +744,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       closeMenu={() => setWakeOpenAt(null)}
                       onAdd={insertActionAt}
                     />
+                  </InsertHub>
                   <button type="button"
                     onClick={() => setUiaInsertAt(uiaInsertAt === i ? null : i)}
                     title="把「選擇器 / 讀文字 / 填入文字」新增的動作插到這個位置（再點一次取消、回到加在最後）"
@@ -1290,6 +1297,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                 </div>
               ))}
               {/* 列表最後的 ➕ 插入點 */}
+              <InsertHub expanded={gapOpenAt === data.actions.length} onExpand={() => setGapOpenAt(data.actions.length)} onCollapse={() => setGapOpenAt(null)}>
               <OcrFieldInserter
                   index={data.actions.length}
                   isOpen={insertOpenAt === data.actions.length}
@@ -1335,6 +1343,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   closeMenu={() => setWakeOpenAt(null)}
                   onAdd={insertActionAt}
                 />
+              </InsertHub>
             </div>
           )}
         </div>
