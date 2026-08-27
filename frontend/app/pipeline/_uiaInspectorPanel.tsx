@@ -215,7 +215,8 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
   const [showWindows, setShowWindows] = useState(false)
   const [loadingWindows, setLoadingWindows] = useState(false)
   // 進階摺疊區(列視窗 + tree 路徑、預設收折、99% 場景用 Live Picker)
-  const [advancedManualOpen, setAdvancedManualOpen] = useState(false)
+  // 滑鼠定位收折(降級):主流程是「列視窗→抓取元素」,實際使用與 SOP 都走樹狀選取
+  const [pickerFoldOpen, setPickerFoldOpen] = useState(false)
   // Live Picker(滑鼠 hover 桌面選元素)
   const [pickerActive, setPickerActive] = useState(false)
   const [hoveredEl, setHoveredEl] = useState<UiaElement | null>(null)
@@ -440,8 +441,19 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
 
   return (
     <div className="rounded-xl border border-purple-200 bg-purple-50/30 p-3 space-y-3">
-      {/* 🎯 Live Picker — 推薦主要路徑、滑鼠移到桌面選元素 */}
-      <div className={`rounded-lg border-2 ${pickerActive ? 'border-emerald-400 bg-emerald-50' : 'border-emerald-200 bg-white'} p-3`}>
+      {/* 🎯 滑鼠定位:降級收折 —— 留給樹太深翻不到/匿名元素認不出/原生 app 樹爆炸的場景 */}
+      <div className="rounded-lg border border-gray-300 bg-gray-50 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setPickerFoldOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-100 transition-colors text-[12px]"
+        >
+          {(pickerFoldOpen || pickerActive) ? <ChevronDown className="w-3.5 h-3.5 text-gray-500" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500" />}
+          <span className="font-semibold text-gray-700 flex-1">🎯 滑鼠定位元素(指到哪選哪)</span>
+          <span className="text-[10px] text-gray-500">樹太深 / 匿名元素時用</span>
+        </button>
+        {(pickerFoldOpen || pickerActive) && (
+        <div className={`m-2 rounded-lg border-2 ${pickerActive ? 'border-emerald-400 bg-emerald-50' : 'border-emerald-200 bg-white'} p-3`}>
         {!pickerActive ? (
           <div>
             <button
@@ -449,7 +461,7 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
               className="w-full px-3 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 flex items-center justify-center gap-2"
             >
               <Crosshair className="w-4 h-4" />
-              🎯 滑鼠定位元素(推薦、滑到哪選哪)
+              🎯 啟動滑鼠定位
             </button>
             <p className="text-[11px] text-emerald-700 mt-1.5 leading-relaxed">
               啟動後:**滑鼠移到桌面任意 UI 元素**、紅框會跟隨。
@@ -484,20 +496,17 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
           </div>
         )}
       </div>
+        )}
+      </div>
 
-      {/* 進階區:手動找元素(列視窗 / 填 pattern / tree 結構)、預設收折 */}
-      <div className="rounded-lg border border-gray-300 bg-gray-50 overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setAdvancedManualOpen(v => !v)}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-gray-100 transition-colors text-[12px]"
-        >
-          {advancedManualOpen ? <ChevronDown className="w-3.5 h-3.5 text-gray-500" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-500" />}
-          <span className="font-semibold text-gray-700 flex-1">🔧 進階(手動找元素)</span>
-          <span className="text-[10px] text-gray-500">列視窗 / tree</span>
-        </button>
-        {advancedManualOpen && (
-          <div className="px-3 pb-3 pt-2 space-y-3 border-t border-gray-300">
+      {/* 主要路徑:選視窗 → 抓取元素(列視窗 / 搜尋 / 樹狀選取)、常駐展開 */}
+      <div className="rounded-lg border border-purple-200 bg-white overflow-hidden">
+        <div className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] bg-purple-50/70 border-b border-purple-100">
+          <span className="font-semibold text-purple-700 flex-1">🪟 選視窗 → 🔍 抓取元素</span>
+          <span className="text-[10px] text-gray-500">列視窗 / 搜尋 / 樹狀選取</span>
+        </div>
+        {true && (
+          <div className="px-3 pb-3 pt-2 space-y-3">
       {/* 視窗 pattern 輸入 + 抓取按鈕 */}
       <div>
         <label className="text-xs font-semibold text-purple-700 uppercase tracking-wide block mb-1.5">
