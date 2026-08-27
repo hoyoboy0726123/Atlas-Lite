@@ -95,7 +95,44 @@ def _resolve_window(auto, action: dict, step_window: str = ""):
         return auto.WindowControl(searchDepth=1, Name=win_pattern)
 
 
-def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list] = None):
+def _rescue_window_foreground(parent, logger=None) -> None:
+    """把 parent 所屬的頂層視窗拉到前景 —— 睡眠分頁/冷凍視窗的最後救援。
+
+    Edge 睡眠分頁會把整頁內容卸載,UIA 找得到視窗卻讀不到任何元素,
+    且背景喚醒叫不醒(防搶焦點)。只在「不拉就必敗」時呼叫。
+    """
+    try:
+        top = parent.GetTopLevelControl() or parent
+    except Exception:
+        top = parent
+    try:
+        title = top.Name or ""
+    except Exception:
+        return
+    if not title:
+        return
+    try:
+        import pygetwindow as gw
+        for w in gw.getWindowsWithTitle(title):
+            try:
+                if w.isMinimized:
+                    w.restore()
+                w.activate()
+                if logger:
+                    logger.info(f"[uia] 救援:把「{title[:40]}」拉到前景(元素找不到、可能是睡眠分頁)")
+                return
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        top.SetActive()
+    except Exception:
+        pass
+
+
+def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list] = None,
+                  rescue: bool = False):
     """在 parent 控制項下找符合 control_def 的子控制項。
 
     control_def 例:
@@ -162,8 +199,21 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
     except Exception:
         pass
     time.sleep(0.4)
+    found = False
     try:
-        ctrl.Exists(1, 0.3)
+        found = ctrl.Exists(1, 0.3)
+    except Exception:
+        pass
+    if found or not rescue:
+        return ctrl
+    # 終極救援(只有 rescue=True 的呼叫點,即「元素必須存在」的動作):
+    # 視窗在、樹卻空 —— 睡眠分頁把頁面卸載了,背景喚醒叫不醒。
+    # 拉到前景讓內容重載、再找最後一次。等待/探測類動作不走這裡
+    # (元素「不在」對它們是合法狀態,拉前景會誤觸發)。
+    _rescue_window_foreground(parent)
+    time.sleep(1.5)
+    try:
+        ctrl.Exists(2, 0.5)
     except Exception:
         pass
     return ctrl
@@ -348,7 +398,7 @@ def execute_uia_action(action: dict, step_window: str,
                 return UiaActionResult(False, f"找不到視窗(action={atype})")
 
         if atype == "uia_click":
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not ctrl or not ctrl.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到控制項:{action.get('control')}")
             # 優先用 UIA pattern 互動(不必把視窗拉到前景、真正背景操作);
@@ -396,7 +446,7 @@ def execute_uia_action(action: dict, step_window: str,
             return UiaActionResult(True, f"已點擊 {action.get('control', {}).get('name', '?')} via {method_used}")
 
         elif atype == "uia_send_keys":
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not ctrl or not ctrl.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到控制項:{action.get('control')}")
             text = action.get("text", "")
@@ -441,7 +491,7 @@ def execute_uia_action(action: dict, step_window: str,
                 return UiaActionResult(False, "uia_send_keys 缺 text 或 keys")
 
         elif atype == "uia_get_text":
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not ctrl or not ctrl.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到控制項:{action.get('control')}")
             # 優先取 Value pattern、退到 Name
@@ -474,7 +524,7 @@ def execute_uia_action(action: dict, step_window: str,
             return UiaActionResult(True, f"讀到 {text[:60]!r}(via {via}、沒設 save_as)")
 
         elif atype == "uia_get_table_rowcount":
-            grid = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            grid = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not grid or not grid.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到表格:{action.get('control')}")
             # GridPattern 是標準介面;沒實作就退到子元素數
@@ -499,7 +549,7 @@ def execute_uia_action(action: dict, step_window: str,
             return UiaActionResult(True, f"表格列數 {n}(沒設 save_as)")
 
         elif atype == "uia_click_cell":
-            grid = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            grid = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not grid or not grid.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到表格:{action.get('control')}")
             row = action.get("row", 0)
@@ -554,7 +604,7 @@ def execute_uia_action(action: dict, step_window: str,
             return UiaActionResult(True, f"已點 cell ({row}, {col}) via {method_used}")
 
         elif atype == "uia_wait_enabled":
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             timeout = float(action.get("timeout_sec", 10))
             t_start = time.time()
             while time.time() - t_start < timeout:
@@ -569,7 +619,7 @@ def execute_uia_action(action: dict, step_window: str,
             # （清單是暫時元素、位置會漂）；走 UIA pattern 是背景操作、不動滑鼠。
             # 選項文字支援 {{變數}} —— 搭配 {{ input.月份 }} / {{ now.month }}
             # 就能「這次選 08、下次選 09」或「永遠選當月」。
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not ctrl or not ctrl.Exists(2, 0.5):
                 return UiaActionResult(False, f"找不到下拉選單:{action.get('control')}")
             raw_opt = action.get("text", "")
@@ -794,7 +844,7 @@ def execute_uia_action(action: dict, step_window: str,
         elif atype == "uia_close_window":
             # 關閉視窗的「正確」方式:走 WindowPattern.Close()、不靠 title/X 點擊、
             # 不必把視窗拉前景。控制項可以是視窗本身或視窗內任何元素(會往上找 Window)
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             if not ctrl:
                 # 沒指定 control 時用 step 的 window
                 ctrl = win
@@ -842,7 +892,7 @@ def execute_uia_action(action: dict, step_window: str,
             return UiaActionResult(False, "目標控制項或父鏈沒 WindowPattern、不能關")
 
         elif atype == "uia_assert_state":
-            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
+            ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"), rescue=True)
             check = (action.get("check") or "exists").strip()
             if check == "exists":
                 ok = bool(ctrl and ctrl.Exists(2, 0.5))
