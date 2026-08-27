@@ -1050,12 +1050,27 @@ export default function PipelinePage() {
       return null
     }
 
-    const loadFromServer = (wf: { name: string; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }) => {
+    const loadFromServer = (id: string, wf: { name: string; updated_at?: number; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }) => {
       const cv = wf.canvas || { nodes: [], edges: [] }
       savingRef.current = true
       setPipelineName(wf.name)
       setNodes((cv.nodes || []) as AppNode[])
       setEdges((cv.edges || []) as never[])
+      // PUT 已把 yaml+canvas 存進後端 —— 這裡只同步 store(含伺服器版本戳)。
+      // 不能再走 saveCanvas 二次 PUT:store 的版本戳還是舊的,樂觀鎖會 409
+      // 誤報「被別處修改」(實測)。
+      useWorkflowStore.setState(s => ({
+        workflows: s.workflows.map(w => w.id === id
+          ? {
+              ...w, name: wf.name,
+              nodes: (cv.nodes || []) as AppNode[],
+              edges: (cv.edges || []) as never[],
+              ...(wf.updated_at !== undefined
+                ? { updatedAt: wf.updated_at * 1000, serverUpdatedAt: wf.updated_at }
+                : {}),
+            }
+          : w),
+      }))
       setTimeout(() => { savingRef.current = false }, 800)
     }
 
@@ -1074,9 +1089,7 @@ export default function PipelinePage() {
         // activeId useEffect 會在 30ms 後把（剛建立的空）新 workflow 載入畫布，
         // 晚於它才寫入、不然會被空畫布覆蓋
         setTimeout(() => {
-          loadFromServer({ ...wf, name })
-          const cv = wf.canvas || { nodes: [], edges: [] }
-          saveCanvas(newId, (cv.nodes || []) as AppNode[], (cv.edges || []) as never[], yaml)
+          loadFromServer(newId, { ...wf, name })
         }, 150)
       } catch (e) {
         toast.error(`套用失敗：${e instanceof Error ? e.message : String(e)}`)
@@ -1089,10 +1102,7 @@ export default function PipelinePage() {
       if (!activeId) { toast.error('沒有選取的工作流'); return null }
       try {
         const wf = await applyWorkflowYaml(activeId, yaml)
-        loadFromServer(wf)
-        // 同步 store + 後端 —— store 裡的舊 nodes 不更新的話,切走再切回來會變回舊內容
-        const cv = wf.canvas || { nodes: [], edges: [] }
-        saveCanvas(activeId, (cv.nodes || []) as AppNode[], (cv.edges || []) as never[], yaml)
+        loadFromServer(activeId, wf)
         toast.success('已套用')
       } catch (e) {
         toast.error(`套用失敗：${e instanceof Error ? e.message : String(e)}`)
@@ -1101,7 +1111,7 @@ export default function PipelinePage() {
     }
     setShowYaml(false)
     return null
-  }, [setNodes, setEdges, createWorkflow, saveCanvas, activeId])
+  }, [setNodes, setEdges, createWorkflow, activeId])
 
   // ── Run pipeline ──────────────────────────────────────────────────────────
   const handleRunClick = async () => {

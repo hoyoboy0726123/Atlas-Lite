@@ -80,7 +80,7 @@ export default function OcrFieldInserter({ index, isOpen, openMenu, closeMenu, o
           type="button"
           onClick={openMenu}
           title="在此位置插入 OCR 取值（讀畫面上某個標籤旁邊的值、存成變數）"
-          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] text-teal-600 border border-dashed border-teal-300 hover:bg-teal-50"
+          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full whitespace-nowrap text-[9px] text-teal-600 border border-dashed border-teal-300 hover:bg-teal-50"
         >
           <Plus className="w-2.5 h-2.5" /> OCR 取值
         </button>

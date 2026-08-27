@@ -100,7 +100,7 @@ export async function validateWorkflowYaml(yaml: string): Promise<{ ok: boolean;
 }
 
 /** 以 yaml 覆寫 workflow(後端會用完整解析器重建 canvas)、回傳更新後的 workflow。 */
-export async function applyWorkflowYaml(id: string, yaml: string): Promise<{ name: string; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }> {
+export async function applyWorkflowYaml(id: string, yaml: string): Promise<{ name: string; updated_at?: number; canvas?: { nodes?: unknown[]; edges?: unknown[] } | null }> {
   const res = await fetchWithRetry(`${BASE}/workflows/${id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ yaml }),
   })

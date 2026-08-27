@@ -43,7 +43,7 @@ export default function WaitDownloadInserter({ index, isOpen, openMenu, closeMen
           type="button"
           onClick={openMenu}
           title="在此位置插入「等下載完成」（等下載資料夾出現寫完的新檔案才繼續）"
-          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] text-sky-600 border border-dashed border-sky-300 hover:bg-sky-50"
+          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full whitespace-nowrap text-[9px] text-sky-600 border border-dashed border-sky-300 hover:bg-sky-50"
         >
           <Download className="w-2.5 h-2.5" /> 等下載
         </button>

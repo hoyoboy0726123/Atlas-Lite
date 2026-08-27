@@ -39,7 +39,7 @@ export default function ClipboardReadInserter({ index, isOpen, openMenu, closeMe
           type="button"
           onClick={openMenu}
           title="讀剪貼簿存成變數（Tk 等 UIA 讀不到的工具：先按它的「複製」鈕、再用這個接住內容）"
-          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] text-emerald-600 border border-dashed border-emerald-300 hover:bg-emerald-50"
+          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full whitespace-nowrap text-[9px] text-emerald-600 border border-dashed border-emerald-300 hover:bg-emerald-50"
         >
           <ClipboardPaste className="w-2.5 h-2.5" /> 讀剪貼簿
         </button>

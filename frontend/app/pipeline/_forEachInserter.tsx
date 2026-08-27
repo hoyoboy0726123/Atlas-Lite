@@ -54,7 +54,7 @@ export default function ForEachInserter({ index, isOpen, hasActions, openMenu, c
           type="button"
           onClick={openMenu}
           title="逐筆迴圈：清單裡每一筆各跑一遍子動作（例：5 個品規逐一查詢匯出）"
-          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] text-fuchsia-600 border border-dashed border-fuchsia-300 hover:bg-fuchsia-50"
+          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full whitespace-nowrap text-[9px] text-fuchsia-600 border border-dashed border-fuchsia-300 hover:bg-fuchsia-50"
         >
           <Repeat className="w-2.5 h-2.5" /> 逐筆
         </button>

@@ -43,7 +43,7 @@ export default function OcrWaitInserter({ index, isOpen, openMenu, closeMenu, on
           type="button"
           onClick={openMenu}
           title="在此位置插入「OCR 等待」（等畫面上某段文字出現或消失才繼續，適合 UIA 讀不到的畫面）"
-          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] text-orange-600 border border-dashed border-orange-300 hover:bg-orange-50"
+          className="opacity-30 hover:opacity-100 transition-opacity flex items-center gap-0.5 px-2 py-0.5 rounded-full whitespace-nowrap text-[9px] text-orange-600 border border-dashed border-orange-300 hover:bg-orange-50"
         >
           <Eye className="w-2.5 h-2.5" /> OCR 等待
         </button>
