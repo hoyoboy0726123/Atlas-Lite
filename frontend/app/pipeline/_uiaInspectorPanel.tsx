@@ -1055,7 +1055,7 @@ function UiaActionPicker({
               value={textInput}
               onChange={e => setTextInput(e.target.value)}
               placeholder="文字(可含 {{var}} 或 {{ steps.X.output.Y }})"
-              className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+              className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
             />
             <VariableButton
               workflowId={workflowId}
@@ -1100,7 +1100,7 @@ function UiaActionPicker({
             value={keysInput}
             onChange={e => setKeysInput(e.target.value)}
             placeholder="按鍵組合、例:enter / ctrl+s / tab / f5"
-            className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+            className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
           />
           <HelpTooltip
             title="送鍵"
@@ -1132,7 +1132,7 @@ function UiaActionPicker({
             value={clipboardInput}
             onChange={e => setClipboardInput(e.target.value)}
             placeholder="例:{{order_id}}、{{ steps.X.output.Y }}、固定文字"
-            className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+            className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
           />
           <VariableButton
             workflowId={workflowId}
@@ -1180,7 +1180,7 @@ function UiaActionPicker({
               value={saveAsInput}
               onChange={e => setSaveAsInput(e.target.value)}
               placeholder="變數名(例 row_count)"
-              className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+              className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
             />
             <HelpTooltip
               title="讀列數"
@@ -1205,7 +1205,7 @@ function UiaActionPicker({
               value={rowInput}
               onChange={e => setRowInput(e.target.value)}
               placeholder="row(數字或 {{var + 1}})"
-              className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
+              className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs font-mono"
             />
             <input
               value={colInput}
