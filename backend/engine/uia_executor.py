@@ -147,7 +147,26 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
     if not hasattr(parent, method_name):
         # 不存在的 type、退回通用 Control
         method_name = "Control"
-    return getattr(parent, method_name)(**kwargs)
+    ctrl = getattr(parent, method_name)(**kwargs)
+    # Edge 冷樹自癒:視窗閒置後 a11y 子樹被放掉,FindFirst 找得到視窗卻找不到
+    # 頁面元素(實測:重開的頁面閒置幾分鐘後 send_keys 全滅)。第一次找不到就
+    # 實際列舉子元素逼 Chromium 重建樹、再試一次。Exists() 每次呼叫都會重搜,
+    # 所以同一個 lazy control 物件可以直接重試。
+    try:
+        if ctrl.Exists(0.6, 0.2):
+            return ctrl
+    except Exception:
+        return ctrl
+    try:
+        parent.GetChildren()
+    except Exception:
+        pass
+    time.sleep(0.4)
+    try:
+        ctrl.Exists(1, 0.3)
+    except Exception:
+        pass
+    return ctrl
 
 
 def element_exists(window_pattern: str, control_def: dict,

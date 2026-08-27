@@ -170,6 +170,11 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   `wait_text`(OCR 等文字出現/消失)、
   `if_image_found` / `if_text_found`(CV/OCR 版條件分支,同樣 then/else)。
   能用 UIA 就用 UIA —— 快、準、不受視窗遮擋影響。
+  ⚠ 瀏覽器「睡眠分頁」:目標網頁閒置太久(小時級),Edge 會把整頁內容卸載,
+  UIA 找得到視窗卻讀不到任何頁面元素、連背景喚醒都叫不醒。長時間閒置後才
+  操作的網頁,流程開頭加 `{type: activate_window, title_contains: "..."}`
+  + `{type: wait, seconds: 1.5}` 拉到前景讓分頁重載;正式部署建議在 Edge
+  設定關閉「睡眠索引標籤」(edge://settings/system)。
   Tkinter 寫的工具 UIA 讀不到內容(Tk 沒有 UIA provider、整個視窗是空白
   Pane)。清單在 Tk 工具裡時用「剪貼簿交接」:工具端做一顆「複製清單」鈕
   (勾選的項目一行一筆放進剪貼簿),Atlas 端:

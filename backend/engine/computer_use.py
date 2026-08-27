@@ -2052,10 +2052,16 @@ def execute_action(
                     logger.warning(f"[computer_use] {indent}  ⚠ {item_failed}(continue_on_error,跳下一筆)")
                 else:
                     done_n += 1
+            if done_n == 0:
+                # 全部筆都失敗 —— 就算 continue_on_error 也不能回報成功,
+                # 不然「6/6 成功」底下藏著 0/3 完成(實測誤導過使用者)
+                return ActionResult(False, index, atype,
+                    f"for_each 全部 {len(items)} 筆都失敗:" +
+                    "; ".join(m[:100] for m in fail_msgs[:3]))
             msg = f"for_each 完成 {done_n}/{len(items)} 筆"
             if fail_msgs:
                 msg += f"(失敗 {len(fail_msgs)} 筆:" + "; ".join(m[:80] for m in fail_msgs[:3]) + ")"
-                # 有失敗但 continue_on_error:整體算成功、訊息誠實列出
+                # 部分失敗且 continue_on_error:整體算成功、訊息誠實列出
             # 迴圈變數留著(最後一筆的值),後續動作還能引用
 
         elif atype == "wait_text":
