@@ -318,9 +318,15 @@ def execute_uia_action(action: dict, step_window: str,
 
     atype = action.get("type", "")
     try:
-        win = _resolve_window(auto, action, step_window)
-        if not win.Exists(2, 0.5):
-            return UiaActionResult(False, f"找不到視窗(action={atype})")
+        # 剪貼簿動作不需要視窗 —— 別讓「目標視窗剛好不在前景/被關」害一個
+        # 跟視窗無關的動作失敗(實測:讀剪貼簿排在切去別的工具之後,步驟視窗
+        # 被判找不到、整步陪葬)。
+        _windowless = atype in ("uia_get_clipboard", "uia_set_clipboard")
+        win = None
+        if not _windowless:
+            win = _resolve_window(auto, action, step_window)
+            if not win.Exists(2, 0.5):
+                return UiaActionResult(False, f"找不到視窗(action={atype})")
 
         if atype == "uia_click":
             ctrl = _find_control(auto, win, action.get("control") or {}, fallback_rect=action.get("rect"))
