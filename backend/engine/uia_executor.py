@@ -85,14 +85,34 @@ def _resolve_window(auto, action: dict, step_window: str = ""):
         return auto.GetForegroundControl()
 
     # wildcard 處理
+    import re
     has_star = "*" in win_pattern
     if has_star:
         # 轉 regex:* → .*
-        import re
         regex = "^" + re.escape(win_pattern).replace(r"\*", ".*") + "$"
-        return auto.WindowControl(searchDepth=1, RegexName=regex)
+        win = auto.WindowControl(searchDepth=1, RegexName=regex)
     else:
-        return auto.WindowControl(searchDepth=1, Name=win_pattern)
+        win = auto.WindowControl(searchDepth=1, Name=win_pattern)
+    if win.Exists(1, 0.3):
+        return win
+    # 隱形字元後備比對:Edge 等視窗標題藏零寬字元(U+200B),使用者手打的
+    # pattern 沒有它就永遠對不上,而且肉眼完全看不出差異(踩過三次)。
+    # 比對前把 pattern 與標題的隱形字元都拆掉再配一次。
+    _INVIS = "​‌‍﻿"
+    def _strip(s):
+        return re.sub(f"[{_INVIS}]", "", s or "")
+    pat_s = _strip(win_pattern)
+    regex_s = "^" + re.escape(pat_s).replace(r"\*", ".*") + "$" if "*" in pat_s         else "^" + re.escape(pat_s) + "$"
+    try:
+        for w in auto.GetRootControl().GetChildren():
+            try:
+                if re.match(regex_s, _strip(w.Name)):
+                    return w
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return win   # 還是沒有就回原物件,讓呼叫端的 Exists 檢查誠實失敗
 
 
 def _rescue_window_foreground(parent, logger=None) -> None:

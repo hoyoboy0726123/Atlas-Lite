@@ -356,6 +356,18 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
       description: describeAction(type, el, extra),
       ...extra,
     }
+    // 巢狀 then/else 子動作也蓋上視窗 —— 不蓋的話它們落回「步驟層級」的
+    // 目標視窗,使用者切去抓別的視窗的元素後,子動作就跑錯視窗找(實測:
+    // 目標視窗被切到 Tk,分歧裡的「點確定」跑去 Tk 找、整條炸掉)。
+    if (action.window) {
+      for (const nf of ['then', 'else'] as const) {
+        const lst = (action as Record<string, unknown>)[nf]
+        if (Array.isArray(lst)) {
+          (action as Record<string, unknown>)[nf] =
+            lst.map((a: Record<string, unknown>) => ({ window: action.window, ...a }))
+        }
+      }
+    }
     onAddAction(action)
     toast.success(`已加 ${type}(${el.name || el.type})`)
   }
