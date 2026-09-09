@@ -17,9 +17,10 @@ interface Props {
   openMenu: () => void
   closeMenu: () => void
   onAdd: (index: number, action: ComputerUseAction) => void
+  onAddMany: (index: number, actions: ComputerUseAction[]) => void
 }
 
-export default function WakeWindowInserter({ index, isOpen, defaultTitle, openMenu, closeMenu, onAdd }: Props) {
+export default function WakeWindowInserter({ index, isOpen, defaultTitle, openMenu, closeMenu, onAdd, onAddMany }: Props) {
   const [title, setTitle] = useState('')
   const [waitSec, setWaitSec] = useState('1.5')
   // 開啟時帶入節點目標視窗(去 * 取關鍵字);使用者改過就不覆蓋
@@ -33,13 +34,16 @@ export default function WakeWindowInserter({ index, isOpen, defaultTitle, openMe
   const submit = () => {
     if (!title.trim()) { toast.error('請填視窗標題關鍵字'); return }
     const t = title.trim()
-    onAdd(index, {
-      type: 'activate_window',
-      title_contains: t,
-      description: `喚醒「${t}」視窗(拉到前景、睡眠分頁重載)`,
-    } as ComputerUseAction)
     const sec = Number(waitSec) || 1.5
-    onAdd(index + 1, { type: 'wait', seconds: sec, description: `等視窗載入 ${sec}s` })
+    // 一定要一次插兩個 —— 連叫兩次 onAdd 會因 React 狀態競態互相蓋掉(實測)
+    onAddMany(index, [
+      {
+        type: 'activate_window',
+        title_contains: t,
+        description: `喚醒「${t}」視窗(拉到前景、睡眠分頁重載)`,
+      } as ComputerUseAction,
+      { type: 'wait', seconds: sec, description: `等視窗載入 ${sec}s` },
+    ])
     toast.success(`已插入喚醒「${t}」＋等待 ${sec}s`)
     closeMenu()
   }

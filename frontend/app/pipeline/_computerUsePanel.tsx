@@ -74,6 +74,15 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
     onUpdate({ actions: next })
   }
 
+  /** 一次插入多個動作。⚠ 連續呼叫兩次 insertActionAt 會因 React 狀態
+   *  還沒更新而互相蓋掉(實測:喚醒插入器的 activate_window 被 wait 蓋掉、
+   *  只剩一個動作),要插多個必須用這個一次做完。 */
+  const insertActionsAt = (index: number, acts: ComputerUseAction[]) => {
+    const next = [...(data.actions || [])]
+    next.splice(index, 0, ...acts)
+    onUpdate({ actions: next })
+  }
+
   /** 把目前序列的全部動作包進一個 for_each(先調通單筆、再一鍵套迴圈)。 */
   const wrapAllIntoForEach = (fe: ComputerUseAction) => {
     onUpdate({ actions: [{ ...fe, do: [...(data.actions || [])] }] })
@@ -697,6 +706,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   openMenu={() => setWakeOpenAt(0)}
                   closeMenu={() => setWakeOpenAt(null)}
                   onAdd={insertActionAt}
+                  onAddMany={insertActionsAt}
                 />
               </InsertHub>
             </>
@@ -753,6 +763,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                       openMenu={() => setWakeOpenAt(i)}
                       closeMenu={() => setWakeOpenAt(null)}
                       onAdd={insertActionAt}
+                      onAddMany={insertActionsAt}
                     />
                   </InsertHub>
                   <button type="button"
@@ -1354,6 +1365,7 @@ export default function ComputerUsePanel({ node, pipelineName, onUpdate, onClose
                   openMenu={() => setWakeOpenAt(data.actions.length)}
                   closeMenu={() => setWakeOpenAt(null)}
                   onAdd={insertActionAt}
+                  onAddMany={insertActionsAt}
                 />
               </InsertHub>
             </div>
