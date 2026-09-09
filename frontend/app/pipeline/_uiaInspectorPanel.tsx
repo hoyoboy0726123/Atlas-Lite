@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, MousePointerClick, Type, Eye, Hash, ListChecks, Clock, CheckCircle, RefreshCcw, Search, AppWindow, Crosshair, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  uiaInspect, uiaHighlight, uiaListWindows,
+  uiaInspect, uiaHighlight, uiaListWindows, uiaActivateWindow,
   uiaPickerStart, uiaPickerPoll, uiaPickerConsume, uiaPickerStop,
   type UiaElement, type UiaInspectResult, type UiaWindowInfo
 } from '@/lib/api'
@@ -533,6 +533,22 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
           >
             {loadingWindows ? <RefreshCcw className="w-3.5 h-3.5 animate-spin shrink-0" /> : <AppWindow className="w-3.5 h-3.5 shrink-0" />}
             列視窗
+          </button>
+          <button
+            onClick={async () => {
+              if (!uiaWindow.trim()) { toast.error('先填目標視窗'); return }
+              try {
+                const r = await uiaActivateWindow(uiaWindow.trim())
+                if (r.ok) toast.success(`已拉到前景:${(r.title || '').slice(0, 30)}`)
+                else toast.error(r.error || '拉不上來')
+              } catch (e) {
+                toast.error(`失敗:${e instanceof Error ? e.message : String(e)}`)
+              }
+            }}
+            title="把目標視窗拉到前景 —— 匿名元素(Tk 等)只能靠 hover 紅框對照畫面認,視窗在背景時紅框畫在別的視窗上"
+            className="flex-1 px-2 py-1.5 bg-white border border-purple-300 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-50 flex items-center justify-center gap-1 whitespace-nowrap"
+          >
+            ⬆ 拉到前景
           </button>
           <button
             onClick={inspect}

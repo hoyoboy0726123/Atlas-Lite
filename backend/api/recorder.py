@@ -482,6 +482,54 @@ class UiaInspectRequest(BaseModel):
     max_children_per_node: int = 50  # 每節點子元素上限(避免大表格 1 萬列展開)
 
 
+class UiaActivateRequest(BaseModel):
+    window_pattern: str
+
+
+@router.post("/computer-use/uia/activate")
+async def uia_activate(req: UiaActivateRequest):
+    """把目標視窗拉到前景。
+
+    給 Inspector 用:Tk 這類低可指名率的視窗,選匿名元素只能靠 hover 紅框
+    對照畫面認 —— 視窗埋在背景時紅框畫在別的視窗上,根本沒法認。
+    """
+    import re as _re
+    try:
+        import uiautomation as auto
+        pat = (req.window_pattern or "").strip()
+        if not pat:
+            return {"ok": False, "error": "視窗 pattern 不能是空的"}
+        if "*" in pat:
+            regex = "^" + _re.escape(pat).replace(r"\*", ".*") + "$"
+            win = auto.WindowControl(searchDepth=1, RegexName=regex)
+        else:
+            win = auto.WindowControl(searchDepth=1, Name=pat)
+        if not win.Exists(2, 0.5):
+            # 沒有 * 時寬鬆重試一次 substring(使用者常貼不含萬用字元的部分標題)
+            if "*" not in pat:
+                regex = "^.*" + _re.escape(pat) + ".*$"
+                win = auto.WindowControl(searchDepth=1, RegexName=regex)
+            if not win.Exists(2, 0.5):
+                return {"ok": False, "error": f"找不到視窗:{pat}"}
+        title = win.Name or ""
+        try:
+            import pygetwindow as gw
+            for w in gw.getWindowsWithTitle(title):
+                try:
+                    if w.isMinimized:
+                        w.restore()
+                    w.activate()
+                    return {"ok": True, "title": title}
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        win.SetActive()
+        return {"ok": True, "title": title}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 @router.post("/computer-use/uia/inspect")
 async def uia_inspect(req: UiaInspectRequest):
     """檢視 UIA element tree、給 frontend tree picker 用。

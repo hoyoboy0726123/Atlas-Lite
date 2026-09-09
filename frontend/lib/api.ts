@@ -805,6 +805,16 @@ export interface UiaWindowInfo {
 }
 
 /** 列當下所有可見的 top-level 視窗。 */
+/** 把目標視窗拉到前景(Inspector 選匿名元素前用,hover 紅框才對得上畫面)。 */
+export async function uiaActivateWindow(pattern: string): Promise<{ ok: boolean; title?: string; error?: string }> {
+  const res = await fetchWithRetry(`${BASE}/computer-use/uia/activate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ window_pattern: pattern }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 export async function uiaListWindows(): Promise<{ ok: boolean; windows: UiaWindowInfo[] }> {
   const res = await fetch(`${BASE}/computer-use/uia/windows`)
   if (!res.ok) {
