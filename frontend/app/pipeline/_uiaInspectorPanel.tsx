@@ -361,9 +361,9 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
     // 目標視窗被切到 Tk,分歧裡的「點確定」跑去 Tk 找、整條炸掉)。
     if (action.window) {
       for (const nf of ['then', 'else'] as const) {
-        const lst = (action as Record<string, unknown>)[nf]
+        const lst = (action as unknown as Record<string, unknown>)[nf]
         if (Array.isArray(lst)) {
-          (action as Record<string, unknown>)[nf] =
+          (action as unknown as Record<string, unknown>)[nf] =
             lst.map((a: Record<string, unknown>) => ({ window: action.window, ...a }))
         }
       }
