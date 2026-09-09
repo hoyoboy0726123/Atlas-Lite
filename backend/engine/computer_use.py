@@ -2278,27 +2278,38 @@ def execute_action(
             if found:
                 # 剛彈出的對話框有開場動畫,立刻點擊會被吃掉(回報成功卻沒生效,
                 # 實測踩過) —— 偵測到就先讓它站穩再跑 then 分支。
-                time.sleep(0.5)
+                time.sleep(1.0)
             branch = action.get("then", []) if found else action.get("else", [])
             branch = branch or []
             branch_label = "then" if found else "else"
             logger.info(f"[computer_use] {indent}  → 元素 {cdef} "
                         f"{'在' if found else '不在'} → 走 {branch_label} 分支"
                         f"（{len(branch)} 個子動作）")
-            for sub_i, sub_action in enumerate(branch):
-                if not isinstance(sub_action, dict):
-                    return ActionResult(False, index, atype,
-                        f"{branch_label}[{sub_i}] 不是 dict，YAML 格式錯誤")
-                sub_res = execute_action(
-                    sub_action, assets_dir, sub_i, logger, run_id,
-                    _depth=_depth + 1, **_exec_ctx,
-                )
-                if getattr(sub_res, "saved_var", None):
-                    step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
-                if not sub_res.ok:
-                    return ActionResult(False, index, atype,
-                        f"if_element_found/{branch_label}[{sub_i+1}] "
-                        f"({sub_res.action_type}) 失敗：{sub_res.message}")
+            def _run_branch():
+                for sub_i, sub_action in enumerate(branch):
+                    if not isinstance(sub_action, dict):
+                        return (f"{branch_label}[{sub_i}] 不是 dict，YAML 格式錯誤")
+                    sub_res = execute_action(
+                        sub_action, assets_dir, sub_i, logger, run_id,
+                        _depth=_depth + 1, **_exec_ctx,
+                    )
+                    if getattr(sub_res, "saved_var", None):
+                        step_variables[sub_res.saved_var[0]] = sub_res.saved_var[1]
+                    if not sub_res.ok:
+                        return (f"if_element_found/{branch_label}[{sub_i+1}] "
+                                f"({sub_res.action_type}) 失敗：{sub_res.message}")
+                return None
+
+            fail_msg = _run_branch()
+            if fail_msg and branch_label == "then":
+                # 對話框剛彈出的那幾秒,Chromium 的子樹會抖:探測看得到、
+                # 緊接著的點擊卻找不到(實測,單獨重跑同一動作又成功)。
+                # then 分支失敗等 1 秒重試一次,吸收這種瞬時抖動。
+                logger.warning(f"[computer_use] {indent}  then 分支失敗,等 1s 重試一次:{fail_msg[:80]}")
+                time.sleep(1.0)
+                fail_msg = _run_branch()
+            if fail_msg:
+                return ActionResult(False, index, atype, fail_msg)
             msg = (f"if 元素{'在' if found else '不在'} → 執行 {branch_label}"
                    f"（{len(branch)} 個子動作皆 OK）")
 

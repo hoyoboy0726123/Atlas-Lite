@@ -428,6 +428,10 @@ def execute_uia_action(action: dict, step_window: str,
             # (回報成功、實際沒觸發),uia_click 以為成功就不退滑鼠 —— 實測
             # 複製鈕沒按到、剪貼簿還是舊值。
             if (action.get("click_method") or "").strip().lower() == "mouse":
+                # 滑鼠點之前必須把目標視窗拉到最上層 —— 被別的視窗蓋住時,
+                # 滑鼠會打在上層視窗上、還回報成功(實測:連按 6 次 alert 都沒關到)。
+                _rescue_window_foreground(ctrl, logger)
+                time.sleep(0.3)
                 ctrl.Click()
                 return UiaActionResult(True,
                     f"已點擊 {action.get('control', {}).get('name', '?')} via Click(mouse, 指定強制滑鼠)")
@@ -468,7 +472,11 @@ def execute_uia_action(action: dict, step_window: str,
                 except Exception:
                     pass
             if not method_used:
-                # fallback:退回滑鼠點(會叫前景、影響其他工作流)
+                # fallback:退回滑鼠點。先明確把目標視窗拉到最上層 ——
+                # uiautomation 的 Click() 不保證 activate,視窗被蓋住時滑鼠
+                # 打在上層視窗、還回報成功(實測)。
+                _rescue_window_foreground(ctrl, logger)
+                time.sleep(0.3)
                 ctrl.Click()
                 method_used = "Click(mouse, 視窗會被拉到前景)"
             return UiaActionResult(True, f"已點擊 {action.get('control', {}).get('name', '?')} via {method_used}")
