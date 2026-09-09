@@ -174,6 +174,8 @@ export interface ComputerUseAction {
   pattern?: string  // wait_download：檔名 glob
   items?: string | string[]  // for_each：清單或逗號/換行分隔字串
   continue_on_error?: boolean  // for_each：某筆失敗跳下一筆
+  split_as?: string  // for_each：一筆多欄位,變數名用 | 分隔
+  split_sep?: string // for_each：欄位分隔符(預設 -)
   until?: ComputerUseAction | string  // retry_until 巢狀動作 / uia_wait 條件字串(appear/disappear/text_contains/text_equals)
   max_attempts?: number
   wait_between_sec?: number

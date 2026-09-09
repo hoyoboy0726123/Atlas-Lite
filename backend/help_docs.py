@@ -212,6 +212,20 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
         else:
           - {type: wait_download, pattern: "PP_Component*.xlsx", timeout_sec: 300, save_as: 下載檔}
   ```
+  一筆帶多個值(當月+上月的年月對、跨年時年份不同)用 split_as 拆欄位,
+  月份當外層迴圈、品規當內層,動作只寫一份:
+  ```yaml
+  - type: for_each
+    items: "{{ now.prev_month_year }}-{{ now.prev_month }}, {{ now.year }}-{{ now.month }}"
+    save_as: 期間
+    split_as: "查詢年|查詢月"     # 每筆按 split_sep(預設 -)拆開,依序存進變數
+    do:
+      - {type: uia_select, control: {auto_id: year},  text: "{{查詢年}}"}
+      - {type: uia_select, control: {auto_id: month}, text: "{{查詢月}}"}
+      - {type: for_each, items: "{{清單原文}}", save_as: 品規, continue_on_error: true,
+         do: [...填品規→匯出→等待→分歧...]}
+  ```
+  最後一個欄位會吃剩餘部分,內容本身含分隔符不會被切爛。
   另外 {{品規_序號}} 是當前第幾筆(1 起算)。清單也可以先用 uia_get_text 從
   另一個頁面讀下來存變數,items 填 {{那個變數}}(會按換行/逗號切)。
   wait_download 只認「動作開始後新出現、且寫完」的檔案（排除 .crdownload 半成品、

@@ -179,6 +179,8 @@ class ComputerUseAction(BaseModel):
     # for_each 用
     items: Optional[Union[str, list]] = None  # 清單、或逗號/換行分隔字串、或 {{變數}}
     continue_on_error: bool = False           # 某筆失敗時跳下一筆繼續（預設整個中斷）
+    split_as: str = ""                        # 一筆多欄位：變數名用 | 分隔（例：查詢年|查詢月）
+    split_sep: str = "-"                      # 欄位分隔符（最後一個欄位吃剩餘部分）
     row: int | str = 0           # uia_click_cell 用，可填 "{{row_count + 1}}" 延後解析
     column: int | str = 0
     check: str = ""              # uia_assert_state：exists / enabled / focused / checked

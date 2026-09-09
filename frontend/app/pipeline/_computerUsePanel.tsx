@@ -1674,6 +1674,8 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
       </div>,
     )
     rows.push(input('每輪存到變數', 'save_as', '例：品規'))
+    rows.push(input('拆成多變數(|分隔)', 'split_as' as any, '例：查詢年|查詢月(選填)'))
+    rows.push(input('欄位分隔符', 'split_sep' as any, '-'))
   } else if (t === 'wait_text') {
     rows.push(input('文字', 'text', '例：資料處理中'))
     rows.push(input('條件(until)', 'until', 'appear / disappear'))

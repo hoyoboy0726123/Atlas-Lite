@@ -2016,6 +2016,12 @@ def execute_action(
             if not var_name:
                 return ActionResult(False, index, atype,
                     "for_each 缺 save_as(每輪的當前值要存進哪個變數,子動作用 {{變數}} 取用)")
+            # split_as:一筆多欄位。「2026-08」這種一筆兩值的清單(年+月、跨年時
+            # 年份不同)按 split_sep 拆開、分別存進多個變數 —— 月份也能當外層迴圈,
+            # 不用把整段動作複製兩份。名稱用 | 分隔;最後一個欄位吃剩餘部分
+            # (品規等內容本身含分隔符時不會被切爛)。
+            split_names = [s.strip() for s in str(action.get("split_as") or "").split("|") if s.strip()]
+            split_sep = str(action.get("split_sep") or "-") or "-"
             do_list = action.get("do") or []
             if not do_list:
                 return ActionResult(False, index, atype, "for_each 缺 do:(每輪要執行的子動作)")
@@ -2026,6 +2032,18 @@ def execute_action(
                 _check_abort(run_id)
                 step_variables[var_name] = item
                 step_variables[var_name + "_序號"] = str(it_i + 1)
+                if split_names:
+                    parts = [p.strip() for p in item.split(split_sep, len(split_names) - 1)]
+                    if len(parts) < len(split_names):
+                        msg_bad = (f"第 {it_i+1} 筆({item})拆不出 {len(split_names)} 個欄位"
+                                   f"(分隔符「{split_sep}」、拆到 {len(parts)} 段)")
+                        if not cont:
+                            return ActionResult(False, index, atype, "for_each 中斷於" + msg_bad)
+                        fail_msgs.append(msg_bad)
+                        logger.warning(f"[computer_use] {indent}  ⚠ {msg_bad}(跳下一筆)")
+                        continue
+                    for nm, val in zip(split_names, parts):
+                        step_variables[nm] = val
                 logger.info(f"[computer_use] {indent}  ── for_each 第 {it_i+1}/{len(items)} 筆:"
                             f"{var_name}={item!r} ──")
                 item_failed = None

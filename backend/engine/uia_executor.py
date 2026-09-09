@@ -517,7 +517,8 @@ def execute_uia_action(action: dict, step_window: str,
                 # 走到這代表控制項沒有 value(例:純標籤、按鈕),Name 才是它的內容。
                 # 但對輸入框而言 Name 是**標籤**不是值 —— 明講出來。
                 text, via = (ctrl.Name or ""), "Name(注意:輸入框的 Name 是標籤、不是值)"
-            save_as = (action.get("save_as") or "").strip()
+            # save_as 名稱做變數替換 —— for_each 裡「結果{{品規_序號}}」每輪存不同變數
+            save_as = _substitute_vars((action.get("save_as") or ""), variables).strip()
             if save_as:
                 return UiaActionResult(True, f"讀到 {text[:60]!r}(via {via})、存到 {save_as}",
                                        saved_var=(save_as, text))

@@ -26,6 +26,8 @@ export default function ForEachInserter({ index, isOpen, hasActions, tailCount, 
   const [items, setItems] = useState('')
   const [saveAs, setSaveAs] = useState('品規')
   const [cont, setCont] = useState(true)
+  const [splitAs, setSplitAs] = useState('')
+  const [splitSep, setSplitSep] = useState('-')
   const [mode, setMode] = useState<'wrapAfter' | 'wrap' | 'empty'>('wrap')
   // 開啟時依位置挑預設:中間的插入點 → 包之後;最前面 → 包全部;沒動作 → 空迴圈
   useEffect(() => {
@@ -43,6 +45,7 @@ export default function ForEachInserter({ index, isOpen, hasActions, tailCount, 
       items: items.trim(),
       save_as: saveAs.trim(),
       continue_on_error: cont,
+      ...(splitAs.trim() ? { split_as: splitAs.trim(), split_sep: splitSep || '-' } : {}),
       do: [],
       description: `逐筆迴圈 → {{${saveAs.trim()}}}`,
     }
@@ -106,6 +109,20 @@ export default function ForEachInserter({ index, isOpen, hasActions, tailCount, 
           某筆失敗跳下一筆繼續
         </label>
       </div>
+      <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-gray-500">
+        <span className="whitespace-nowrap">每筆拆成多個變數(選填)</span>
+        <input value={splitAs} onChange={e => setSplitAs(e.target.value)}
+          placeholder="例：查詢年|查詢月"
+          className="flex-1 min-w-[110px] text-[11px] px-1.5 py-1 rounded border border-gray-300 font-mono" />
+        <span className="whitespace-nowrap">分隔符</span>
+        <input value={splitSep} onChange={e => setSplitSep(e.target.value)}
+          className="w-9 text-[11px] px-1.5 py-1 rounded border border-gray-300 font-mono text-center" />
+      </div>
+      {splitAs.trim() && (
+        <p className="text-[9px] text-gray-500 leading-snug -mt-1">
+          {'每筆會按分隔符拆開、依序存進這些變數。例：清單一筆「2026-08」+ 拆成「查詢年|查詢月」→ {{查詢年}}=2026、{{查詢月}}=08。月份+品規的雙層查詢：外層迴圈拆年月、內層迴圈跑品規。'}
+        </p>
+      )}
       <div className="space-y-0.5 text-[10px] text-gray-600">
         <label className="flex items-center gap-1 cursor-pointer">
           <input type="radio" checked={mode === 'wrapAfter'} onChange={() => setMode('wrapAfter')} disabled={tailCount === 0} />
