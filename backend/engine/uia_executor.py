@@ -176,6 +176,15 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
         if fallback_rect and len(fallback_rect) == 4 and fallback_rect[2] > 0 and fallback_rect[3] > 0:
             cx = int(fallback_rect[0] + fallback_rect[2] // 2)
             cy = int(fallback_rect[1] + fallback_rect[3] // 2)
+            # ControlFromPoint 是「螢幕定點命中」:那個點被別的視窗蓋住時會
+            # 抓到上層視窗的元素、接著點擊就打錯地方還回報成功(實測:點到
+            # 使用者自己的瀏覽器)。先把目標視窗拉上來,讓這個點屬於它。
+            try:
+                if parent is not None:
+                    _rescue_window_foreground(parent)
+                    time.sleep(0.3)
+            except Exception:
+                pass
             try:
                 return auto.ControlFromPoint(cx, cy)
             except Exception:
