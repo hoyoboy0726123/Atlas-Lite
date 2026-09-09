@@ -2617,8 +2617,24 @@ def execute_computer_use_step(
         )
     assets = Path(assets_dir)
     if not assets.is_dir():
-        # 沒有 assets 目錄也可能 OK（例如只有 type_text / wait），不直接失敗
-        logger.warning(f"[computer_use] assets 目錄不存在：{assets_dir}")
+        # 純 UIA 節點(Inspector 建的)本來就沒有錨點資料夾 —— 只在動作真的
+        # 用到圖(image 欄位,含巢狀)時才警告,不然每次執行都喊一聲是噪音。
+        def _uses_images(acts) -> bool:
+            for a in acts or []:
+                if not isinstance(a, dict):
+                    continue
+                if a.get("image") or a.get("image2") or a.get("full_image"):
+                    return True
+                for nf in ("do", "then", "else"):
+                    if _uses_images(a.get(nf)):
+                        return True
+                u = a.get("until")
+                if isinstance(u, dict) and _uses_images([u]):
+                    return True
+            return False
+        if _uses_images(actions):
+            logger.warning(f"[computer_use] assets 目錄不存在：{assets_dir}"
+                           f"（動作裡有用到錨點圖,執行到那些動作會失敗）")
     else:
         # 錨點圖 preflight：避免跑到一半才發現圖不見
         missing_imgs = validate_action_assets(actions, assets)
