@@ -1691,6 +1691,8 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
     rows.push(input('資料夾(空=Downloads)', 'dir', ''))
     rows.push(input('逾時秒數', 'timeout_sec', '300'))
     rows.push(input('存路徑到變數', 'save_as', '例：下載檔'))
+  } else if (t === 'uia_click') {
+    rows.push(input('點擊方式(留空=pattern優先)', 'click_method' as any, "mouse = 強制滑鼠點(Tk 匿名鈕用)"))
   } else if (t === 'uia_wait') {
     rows.push(input('條件(until)', 'until', 'appear / disappear / text_contains / text_equals'))
     rows.push(input('關鍵字(text_*用)', 'text', '例：已匯出'))

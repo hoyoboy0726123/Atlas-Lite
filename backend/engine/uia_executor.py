@@ -403,6 +403,14 @@ def execute_uia_action(action: dict, step_window: str,
                 return UiaActionResult(False, f"找不到控制項:{action.get('control')}")
             # 優先用 UIA pattern 互動(不必把視窗拉到前景、真正背景操作);
             # pattern 都不支援才退回 ctrl.Click()(那個會 SetActive 把視窗叫到前景再用滑鼠點)
+            # click_method: "mouse" = 跳過 pattern、直接滑鼠真點。
+            # 為什麼需要:Tk 這類 MSAA 橋接的匿名按鈕會「假接受」InvokePattern
+            # (回報成功、實際沒觸發),uia_click 以為成功就不退滑鼠 —— 實測
+            # 複製鈕沒按到、剪貼簿還是舊值。
+            if (action.get("click_method") or "").strip().lower() == "mouse":
+                ctrl.Click()
+                return UiaActionResult(True,
+                    f"已點擊 {action.get('control', {}).get('name', '?')} via Click(mouse, 指定強制滑鼠)")
             method_used = ""
             try:
                 ip = ctrl.GetInvokePattern()
