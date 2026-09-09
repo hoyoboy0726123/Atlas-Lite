@@ -111,6 +111,15 @@ export async function applyWorkflowYaml(id: string, yaml: string): Promise<{ nam
   return res.json()
 }
 
+/** 「同意寫入」:直接套用 AI 助手暫存的提案(不經模型,零重送漂移)。 */
+export async function applyChatPending(token: string): Promise<{ ok: boolean; result: string; workflow_id?: string }> {
+  const res = await fetchWithRetry(`${BASE}/pipeline/chat/apply-pending`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 export async function getHealth(): Promise<{ status: string; warnings: string[] }> {
   const res = await fetch(`${BASE}/health`)
   return res.json()

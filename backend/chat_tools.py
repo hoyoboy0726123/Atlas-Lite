@@ -72,6 +72,50 @@ def list_workflows() -> str:
     return "\n".join(out)
 
 
+# ── 同意寫入(pending)機制 ──────────────────────────────────────
+# 兩段式確認的先天弱點:confirm=True 那次要「重送一模一樣的參數」,弱模型
+# 重送會漏(實測:預覽 3 個動作、確認只送 2 個、嘴上還報 3 個)。所以預覽時
+# 把提案暫存在這裡,前端顯示「同意寫入」按鈕 —— 按下去由系統直接執行暫存
+# 的提案,不再繞回模型。文字同意的舊路徑保留,但會比對差異、不一致就明講。
+_PENDING: dict[str, dict] = {}
+
+_PENDING_HINT = ("請使用者確認 —— 介面會出現「同意寫入」按鈕,按下即由系統直接寫入"
+                 "並在對話顯示結果,屆時你**不要**再呼叫工具。若使用者改用文字同意,"
+                 "才用 confirm=True 重呼叫,且參數必須與本次預覽完全一致、一個都不能漏。")
+
+
+def _stash_pending(tool: str, args: dict) -> str:
+    import time as _t
+    import uuid as _uuid
+    now = _t.time()
+    for k in [k for k, v in list(_PENDING.items()) if now - v.get("ts", 0) > 1800]:
+        _PENDING.pop(k, None)
+    token = "p" + _uuid.uuid4().hex[:8]
+    _PENDING[token] = {"tool": tool, "args": args, "ts": now}
+    return token
+
+
+def apply_pending(token: str) -> dict:
+    """「同意寫入」按鈕的執行入口:直接套用暫存提案,不經模型、零重送漂移。"""
+    p = _PENDING.pop((token or "").strip(), None)
+    if not p:
+        return {"ok": False, "workflow_id": "",
+                "result": "這個提案已過期或已處理過 —— 請再請助手提案一次。"}
+    fns = {"patch_node_actions": patch_node_actions, "add_step": add_step,
+           "patch_step_fields": patch_step_fields, "save_workflow_yaml": save_workflow_yaml}
+    fn = fns.get(p["tool"])
+    if fn is None:
+        return {"ok": False, "workflow_id": "", "result": f"不認得的提案類型:{p['tool']}"}
+    try:
+        res = fn(confirm=True, **p["args"])
+    except Exception as e:
+        return {"ok": False, "workflow_id": p["args"].get("query", ""),
+                "result": f"寫入失敗:{type(e).__name__}: {e}"}
+    bad_signs = ("【預覽", "失敗", "錯誤", "找不到", "不認得", "沒有寫入", "驗不過", "解析不了")
+    ok = not any(s in res[:60] for s in bad_signs)
+    return {"ok": ok, "workflow_id": p["args"].get("query", ""), "result": res}
+
+
 def get_workflow_yaml(query: str) -> str:
     """讀一個工作流的完整 YAML。
 
@@ -346,10 +390,11 @@ def save_workflow_yaml(query: str, yaml_content: str, confirm: bool = False) -> 
     if not confirm:
         old = len((wf.get("yaml") or "").splitlines())
         new = len(yaml_content.splitlines())
-        return (f"【預覽，尚未寫入】要覆寫「{wf['name']}」的 YAML"
+        _tk = _stash_pending("save_workflow_yaml", {"query": wf["id"], "yaml_content": yaml_content})
+        return (f"[pending:{_tk}]【預覽，尚未寫入】要覆寫「{wf['name']}」的 YAML"
                 f"（{old} 行 → {new} 行）。\n"
                 + _step_diff(wf.get("yaml") or "", yaml_content)
-                + f"\n請使用者確認後，再用 confirm=True 呼叫一次。")
+                + "\n" + _PENDING_HINT)
     patch = {"yaml": yaml_content}
     cv = _regen_canvas(yaml_content)
     if cv:
@@ -481,12 +526,27 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
         return (f"這批修改的變數引用有問題，**沒有**執行：\n{xref_bad}\n"
                 f"修好再呼叫一次。不確定有哪些變數就先用 list_workflow_variables。")
 
+    _warn = ""
+    if confirm:
+        for _tk0, _p0 in list(_PENDING.items()):
+            if (_p0.get("tool") == "patch_node_actions"
+                    and _p0["args"].get("query") == wf["id"]
+                    and (_p0["args"].get("step_name") or "").strip() == step_name.strip()):
+                _prev_ops = _p0["args"].get("ops_json") or []
+                if json.dumps(_prev_ops, ensure_ascii=False, sort_keys=True) != \
+                   json.dumps(ops, ensure_ascii=False, sort_keys=True):
+                    _warn = (f"⚠ 這次寫入與剛才的預覽**不一致**"
+                             f"(預覽 {len(_prev_ops)} 個操作、這次 {len(ops)} 個) —— "
+                             f"已照這次送的內容寫入。請把下面實際結果如實告訴使用者,不要照預覽講。\n")
+                _PENDING.pop(_tk0, None)
+                break
     preview = "\n".join(f"  {x}" for x in log_lines)
     summary = (f"「{wf['name']}」的步驟「{step_name}」："
                f"{before_n} 個動作 → {len(actions)} 個\n{preview}")
     if not confirm:
-        return (f"【預覽，尚未寫入】{summary}\n\n"
-                f"請使用者確認後，再用 confirm=True 呼叫一次。")
+        _tk = _stash_pending("patch_node_actions",
+                             {"query": wf["id"], "step_name": step_name, "ops_json": ops})
+        return f"[pending:{_tk}]【預覽，尚未寫入】{summary}\n\n{_PENDING_HINT}"
 
     target["actions"] = actions
     new_yaml = _yaml.safe_dump(spec, allow_unicode=True, sort_keys=False, width=4096)
@@ -498,7 +558,7 @@ def patch_node_actions(query: str, step_name: str, ops_json: str,
     if cv:
         patch["canvas"] = cv
     db.update_workflow(wf["id"], patch)
-    return f"已寫入。{summary}"
+    return f"{_warn}已寫入。{summary}"
 
 
 # ── 按需知識庫 ──────────────────────────────────────────────
@@ -764,7 +824,9 @@ def patch_step_fields(query: str, step_name: str, fields_json: str,
     summary = (f"「{wf['name']}」的步驟「{step_name}」：\n"
                + "\n".join(f"  {c}" for c in changes))
     if not confirm:
-        return f"【預覽，尚未寫入】{summary}\n\n請使用者確認後，再用 confirm=True 呼叫一次。"
+        _tk = _stash_pending("patch_step_fields",
+                             {"query": wf["id"], "step_name": step_name, "fields_json": fields})
+        return f"[pending:{_tk}]【預覽，尚未寫入】{summary}\n\n{_PENDING_HINT}"
 
     for k, v in fields.items():
         target[k] = v
@@ -872,9 +934,10 @@ def add_step(query: str, step_json: str, position: str = "",
             else "腳本")
     summary = f"在「{wf['name']}」的{pos_desc}新增步驟「{new_name}」（{kind}）"
     if not confirm:
-        return (f"【預覽，尚未寫入】{summary}\n"
-                f"內容：{json.dumps(step, ensure_ascii=False)[:400]}\n\n"
-                f"請使用者確認後，再用 confirm=True 呼叫一次。")
+        _tk = _stash_pending("add_step",
+                             {"query": wf["id"], "step_json": step, "position": position})
+        return (f"[pending:{_tk}]【預覽，尚未寫入】{summary}\n"
+                f"內容：{json.dumps(step, ensure_ascii=False)[:400]}\n\n" + _PENDING_HINT)
 
     steps.insert(idx, step)
     new_yaml = _yaml.safe_dump(spec, allow_unicode=True, sort_keys=False, width=4096)

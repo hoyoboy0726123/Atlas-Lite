@@ -23,6 +23,7 @@ import { useWorkflowStore } from './_store'
 import {
   chatStream, chatStatus, type ChatStatus,
   getWorkflowChat, appendWorkflowChat, clearWorkflowChat,
+  applyChatPending,
 } from '@/lib/api'
 
 // ── LaTeX → Unicode（跟 Atlas 同一份）──────────────────────
@@ -119,6 +120,38 @@ export default function AtlasChat() {
       data_scope: '', data_scope_label: '', data_stays_local: false,
     }))
   }, [showChat])
+
+  // ── 同意寫入按鈕(pending):模型提案暫存在後端,按鈕直接套用、不經模型 ──
+  const [pendingDone, setPendingDone] = useState<string[]>([])
+  const [applyingToken, setApplyingToken] = useState<string | null>(null)
+  const pendingTokenOf = (m: ChatMsg): string | null => {
+    let tk: string | null = null
+    for (const tb of m.toolBlocks || []) {
+      const mt = /\[pending:(p[0-9a-f]{8})\]/.exec(tb.preview || '')
+      if (mt) tk = mt[1]
+    }
+    return tk
+  }
+  const approvePending = async (token: string) => {
+    setApplyingToken(token)
+    try {
+      const r = await applyChatPending(token)
+      setPendingDone(prev => [...prev, token])
+      const note: ChatMsg = { role: 'assistant', content: (r.ok ? '✅ ' : '❌ ') + r.result }
+      setMessages(prev => [...prev, note])
+      void persistAppend(note)
+      if (r.ok) {
+        toast.success('已寫入')
+        window.dispatchEvent(new CustomEvent('atlas-lite-wf-updated', { detail: { id: r.workflow_id || '' } }))
+      } else {
+        toast.error('寫入沒有完成，看對話裡的說明')
+      }
+    } catch (e) {
+      toast.error(`寫入失敗：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setApplyingToken(null)
+    }
+  }
 
   // ── 對話歷史：有 activeId → 後端 per-workflow；沒有 → localStorage 暫存 ──
   const SCRATCH_LS_KEY = 'atlas-lite-chat-scratch-v1'
@@ -384,8 +417,9 @@ export default function AtlasChat() {
                               <span className="font-mono truncate min-w-0">{tb.name}</span>
                               {tb.mutating && <span className="text-[10px] shrink-0">會改資料</span>}
                               {tb.preview && (
-                                <span className="text-[10px] text-gray-500 truncate" title={tb.preview}>
-                                  {tb.preview.slice(0, 60)}
+                                <span className="text-[10px] text-gray-500 truncate"
+                                  title={tb.preview.replace(/\[pending:p[0-9a-f]{8}\]/g, '')}>
+                                  {tb.preview.replace(/\[pending:p[0-9a-f]{8}\]/g, '').slice(0, 60)}
                                 </span>
                               )}
                             </span>
@@ -394,6 +428,27 @@ export default function AtlasChat() {
                       ))}
                     </div>
                   )}
+                  {(() => {
+                    if (msg.role !== 'assistant' || msg.streaming) return null
+                    if (i !== messages.length - 1) return null
+                    const tk = pendingTokenOf(msg)
+                    if (!tk || pendingDone.includes(tk)) return null
+                    return (
+                      <div className="mt-1 mb-1 flex items-center gap-2 flex-wrap">
+                        <button
+                          disabled={applyingToken !== null}
+                          onClick={() => void approvePending(tk)}
+                          className="px-3 py-1 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap"
+                        >{applyingToken === tk ? '寫入中…' : '✅ 同意寫入'}</button>
+                        <button
+                          disabled={applyingToken !== null}
+                          onClick={() => setPendingDone(prev => [...prev, tk])}
+                          className="px-3 py-1 rounded border border-gray-300 text-gray-600 text-xs hover:bg-gray-50 whitespace-nowrap"
+                        >先不要</button>
+                        <span className="text-[10px] text-gray-400">按同意＝系統直接寫入，不經模型重送</span>
+                      </div>
+                    )
+                  })()}
                   {msg.role === 'assistant' ? (
                     <div className="prose prose-xs max-w-none prose-p:my-0.5 prose-pre:text-xs prose-pre:whitespace-pre-wrap">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{cleanLatexInChat(msg.content)}</ReactMarkdown>

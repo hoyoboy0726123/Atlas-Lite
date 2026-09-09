@@ -108,6 +108,17 @@ def _merged_context(req: "ChatRequest") -> str:
     return "\n\n".join(parts)
 
 
+class ApplyPendingRequest(BaseModel):
+    token: str
+
+
+@router.post("/pipeline/chat/apply-pending")
+async def apply_pending_api(req: ApplyPendingRequest):
+    """「同意寫入」按鈕:直接套用助手暫存的提案(不經模型、零重送漂移)。"""
+    import chat_tools
+    return chat_tools.apply_pending(req.token)
+
+
 @router.get("/pipeline/chat/status")
 async def chat_status():
     """助手能不能用。前端拿這個決定要不要把「問 AI」反灰。"""

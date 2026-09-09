@@ -437,6 +437,27 @@ export default function PipelinePage() {
     return () => clearTimeout(timer)
   }, [activeId]) // eslint-disable-line
 
+  // AI 助手「同意寫入」按鈕直接改了後端 —— 畫布跟著刷新,不然顯示舊內容
+  useEffect(() => {
+    const h = (e: Event) => {
+      const id = (e as CustomEvent).detail?.id as string | undefined
+      void (async () => {
+        await useWorkflowStore.getState().fetchWorkflows()
+        if (!id || id !== activeId) return
+        const wf = useWorkflowStore.getState().workflows.find(w => w.id === id)
+        if (!wf) return
+        savingRef.current = true
+        setNodes(wf.nodes as AppNode[])
+        setEdges(wf.edges)
+        setPipelineName(wf.name)
+        setTimeout(() => { savingRef.current = false }, 800)
+      })()
+    }
+    window.addEventListener('atlas-lite-wf-updated', h)
+    return () => window.removeEventListener('atlas-lite-wf-updated', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
+
   // 自動偵測背景執行中的 pipeline（排程觸發等），每 3 秒輪詢
   const bgDetectRef = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => {
