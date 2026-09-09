@@ -401,10 +401,15 @@ def _ollama_chat(cfg: dict, messages: list[dict], temperature: float) -> str:
         _num_ctx = 16384
     try:
         with httpx.Client(timeout=_OLLAMA_TIMEOUT) as client:
+            # think=False:關掉 qwen3 等思考型模型的推理段 —— agent 迴圈一問多輪,
+            # 每輪先「想」幾十秒體感就是卡死;工具協定靠的是明確指示不是長推理,
+            # 實測關掉品質沒掉、速度差數倍。要開回來設 ATLASLITE_OLLAMA_THINK=1。
+            _think = _os.environ.get("ATLASLITE_OLLAMA_THINK", "0") == "1"
             r = client.post(f"{base}/api/chat",
                             json={"model": cfg["model"],
                                   "messages": messages,
                                   "stream": False,
+                                  "think": _think,
                                   "options": {"temperature": temperature,
                                               "num_ctx": _num_ctx}})
     except httpx.ConnectError:
