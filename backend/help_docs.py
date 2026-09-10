@@ -191,6 +191,11 @@ _DOCS["computer_use"] = """# computer_use 節點（桌面自動化）補充
   - {type: uia_get_clipboard, save_as: 清單原文}   # 剪貼簿空的會誠實報錯
   - {type: for_each, items: "{{清單原文}}", save_as: 品規, do: [...]}
   ```
+  ⚠ 要「點」Tk 工具內部的按鈕:Tk 的按鈕透過 MSAA 橋接會**假接受**一般的
+  UIA 點擊指令(回報成功、實際沒觸發)—— uia_click 要加 `click_method: "mouse"`
+  強制滑鼠真點(執行時會自動把目標視窗拉到最上層再點)。匿名元素(沒 name
+  沒 auto_id)靠抓取當下的 rect 定位,視窗位置變了要重抓 —— 比 CV 錨點脆,
+  能用 CV 錄製優先。
   工具端也可以改成直接 POST /pipeline/run 帶 input_params(最乾淨,連點擊都免)。
   多筆逐一查詢(5 個品規各匯出一次)用 `for_each`,不要複製五份動作:
   ```yaml

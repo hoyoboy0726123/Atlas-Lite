@@ -91,6 +91,7 @@ uia_click / uia_send_keys / uia_get_text / uia_select(下拉選項) /
 uia_wait(等出現/消失/文字) / if_element_found(條件分歧 then/else) /
 wait_download(等下載完成) / for_each(清單逐筆迴圈) /
 uia_get_clipboard・uia_set_clipboard(剪貼簿交接,Tk 等 UIA 讀不到的工具用) /
+uia_click 的 click_method:"mouse"(Tk 按鈕假接受一般點擊時強制滑鼠真點) /
 activate_window(喚醒視窗) / wait_text・if_text_found(OCR 版) /
 wait_image・if_image_found(CV 版) / ocr_get_text(讀標籤旁的值)。
 
