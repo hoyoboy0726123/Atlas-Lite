@@ -1789,8 +1789,22 @@ def execute_action(
                 if title:
                     wins = [w for w in all_wins if (w.title or "") == title]
                 else:
-                    needle = title_contains.lower()
-                    wins = [w for w in all_wins if needle in (w.title or "").lower()]
+                    # 使用者常把 UIA 的萬用字元 pattern(「SCM Portal*」)原樣填進來;
+                    # 字面比對 * 永遠不中。Edge 標題還藏零寬字元,一併去掉再比。
+                    _inv = "\u200b\u200c\u200d\ufeff"
+                    parts = [p for p in title_contains.lower().split("*") if p]
+
+                    def _hit(t: str) -> bool:
+                        t = "".join(ch for ch in t.lower() if ch not in _inv)
+                        pos = 0
+                        for p in parts:
+                            i = t.find(p, pos)
+                            if i < 0:
+                                return False
+                            pos = i + len(p)
+                        return True
+
+                    wins = [w for w in all_wins if parts and _hit(w.title or "")]
                 return [w for w in wins if (w.title or "").strip()]
 
             deadline = time.time() + timeout
