@@ -807,6 +807,7 @@ function UiaActionPicker({
   const [waitTimeout, setWaitTimeout] = useState('60')
   const [ifTimeout, setIfTimeout] = useState('3')
   const [ifThen, setIfThen] = useState('click')
+  const [ifGoneTimeout, setIfGoneTimeout] = useState('300')
   const [ifElse, setIfElse] = useState('none')
   const [ifDlPattern, setIfDlPattern] = useState('*.xlsx')
   const [ifDlTimeout, setIfDlTimeout] = useState('300')
@@ -1014,8 +1015,16 @@ function UiaActionPicker({
           <select value={ifThen} onChange={e => setIfThen(e.target.value)}
             className="border border-gray-200 rounded px-1.5 py-1 text-xs">
             <option value="click">點擊這個元素</option>
+            <option value="wait_gone">等它消失</option>
             <option value="none">不做動作</option>
           </select>
+          {ifThen === 'wait_gone' && (
+            <>
+              <input value={ifGoneTimeout} onChange={e => setIfGoneTimeout(e.target.value)}
+                className="w-12 border border-gray-200 rounded px-1.5 py-1 text-xs text-right" title="最多等幾秒" />
+              秒
+            </>
+          )}
           否則 →
           <select value={ifElse} onChange={e => setIfElse(e.target.value)}
             className="border border-gray-200 rounded px-1.5 py-1 text-xs">
@@ -1049,6 +1058,11 @@ function UiaActionPicker({
                    // 剛彈出的對話框會吃掉點擊(回報成功卻沒關)——點完必須驗證它真的消失
                    { type: 'uia_wait', control, until: 'disappear', timeout_sec: 5,
                      description: `等「${element.name || element.type}」消失(確認真的按掉)` }]
+                // 「處理中」遮罩不一定會出現(真系統查無資料時直接跳對話框)——
+                // 出現才等它消失,沒出現不算失敗;單獨用 ⏳ 等出現會卡死整筆。
+                : ifThen === 'wait_gone'
+                ? [{ type: 'uia_wait', control, until: 'disappear', timeout_sec: Number(ifGoneTimeout) || 300,
+                     description: `等「${element.name || element.type}」消失` }]
                 : []
               const elseActs: ComputerUseAction[] = ifElse === 'download'
                 ? [{ type: 'wait_download', pattern: ifDlPattern.trim() || '*',
@@ -1069,7 +1083,7 @@ function UiaActionPicker({
         </div>
         <div className="text-[10px] text-sky-700/70">
           典型：匯出後「查無資料」對話框的「確定」鈕 —— 出現就按掉繼續，沒出現代表有資料、走等下載。
-          探測不到不算失敗、只是走「否則」分支。
+          「處理中」遮罩不一定出現時用「等它消失」。探測不到不算失敗、只是走「否則」分支。
         </div>
       </div>
 

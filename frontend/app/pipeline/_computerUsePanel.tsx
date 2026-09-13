@@ -1749,13 +1749,25 @@ function InlineActionEditor({ action, workflowId, stepName, onPatch, onClose }: 
 
   // uia 動作的目標元素(control)欄位 —— 之前只能「刪掉重選」,萬用字元
   // name(資料處理中*)這種微調逼人重抓一次元素,直接開放改。
-  if (t.startsWith('uia_') && action.control && t !== 'uia_get_clipboard') {
+  if ((t.startsWith('uia_') || t === 'if_element_found') && action.control && t !== 'uia_get_clipboard') {
+    const oldName = String((action.control as Record<string, unknown>)?.name ?? '')
+    // 分歧的子動作是從同一個元素生出來的(點它 / 等它消失),改名要一起跟,
+    // 否則探測用 資料處理中* 命中、子動作卻還在等舊的精確名稱。
+    const renameBranch = (list: unknown, name: string) => Array.isArray(list)
+      ? list.map((s: any) => (s?.control && String(s.control.name ?? '') === oldName)
+          ? { ...s, control: { ...s.control, name } } : s)
+      : list
     rows.push(
       <div key="ctl-name" className="flex items-center gap-1.5">
         <span className="text-[10px] text-gray-500 w-14 shrink-0 text-right">目標 name</span>
         <input
-          value={String((action.control as Record<string, unknown>)?.name ?? '')}
-          onChange={e => onPatch({ control: { ...(action.control || {}), name: e.target.value } } as any)}
+          value={oldName}
+          onChange={e => onPatch({
+            control: { ...(action.control || {}), name: e.target.value },
+            ...(t === 'if_element_found'
+              ? { then: renameBranch(action.then, e.target.value), else: renameBranch((action as any).else, e.target.value) }
+              : {}),
+          } as any)}
           placeholder="支援 * 萬用字元，例：資料處理中*"
           className="flex-1 min-w-0 border border-indigo-200 rounded px-2 py-1 text-xs font-mono"
         />
