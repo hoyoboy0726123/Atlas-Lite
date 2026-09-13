@@ -20,6 +20,7 @@ import {
   type UiaElement, type UiaInspectResult, type UiaWindowInfo
 } from '@/lib/api'
 import type { ComputerUseAction } from './_helpers'
+import { windowPatternOf } from './_helpers'
 import { VariableButton } from './_variablePicker'
 
 interface Props {
@@ -588,9 +589,7 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
               <button
                 key={i}
                 onClick={() => {
-                  // 把 name 包成 wildcard pattern(取頭尾去 wildcard、避免特殊字元)
-                  // 用「name 的前 30 字 + *」做寬鬆比對
-                  const trimmed = w.name.length > 30 ? w.name.slice(0, 30) + '*' : w.name
+                  const trimmed = windowPatternOf(w.name) || w.name
                   onUpdateWindow(trimmed)
                   setShowWindows(false)
                   toast.success(`已套用 pattern:${trimmed}`)

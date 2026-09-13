@@ -252,6 +252,27 @@ export function newHumanConfirmData(index = 0): HumanConfirmData {
   }
 }
 
+/**
+ * 視窗標題 → 穩定的關鍵字。瀏覽器標題的尾巴會變:「和其他 N 個頁面」隨分頁數變、
+ * 「- 公司 - Microsoft Edge」帶設定檔名,Edge 還藏零寬字元 —— 整串拿去比對,
+ * 多開一個分頁就找不到視窗。只留頁面本身的標題。
+ */
+export function windowKeyword(title: string): string {
+  return (title || '')
+    .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
+    .replace(/\*/g, '')
+    .replace(/\s+(?:和其他\s*\d+\s*個頁面|and \d+ more pages?)[\s\S]*$/i, '')
+    .replace(/\s+-\s+(?:[^-]+\s+-\s+)?(?:Microsoft\s*Edge|Google Chrome|Mozilla Firefox)$/i, '')
+    .replace(/\s+-\s+[^-]+\s+-\s+Microsoft(?:\s*E\w*)?$/i, '')
+    .trim()
+}
+
+/** 視窗標題 → UIA 目標視窗 pattern(頭尾萬用字元)。 */
+export function windowPatternOf(title: string): string {
+  const k = windowKeyword(title)
+  return k ? `*${k}*` : ''
+}
+
 // 防呆:新增桌面自動化節點時,確保名稱不與現有節點撞名(計數器頁面重整後會歸零、
 // 撞名會讓兩節點共用同一個 _assets 夾 → 互相覆蓋錨點圖)。回傳一個目前沒被用到的 桌面自動化_N。
 export function dedupeComputerUseName(name: string, existing: Set<string>): string {

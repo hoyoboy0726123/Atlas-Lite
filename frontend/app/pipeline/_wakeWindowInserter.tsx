@@ -5,9 +5,11 @@
  * 任何元素,背景喚醒叫不醒 —— 操作前要明確拉到前景讓分頁重載。
  */
 import { useEffect, useState } from 'react'
-import { AppWindow } from 'lucide-react'
+import { AppWindow, RefreshCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ComputerUseAction } from './_helpers'
+import { windowKeyword } from './_helpers'
+import { uiaListWindows, uiaHighlight, type UiaWindowInfo } from '@/lib/api'
 
 interface Props {
   index: number
@@ -23,13 +25,29 @@ interface Props {
 export default function WakeWindowInserter({ index, isOpen, defaultTitle, openMenu, closeMenu, onAdd, onAddMany }: Props) {
   const [title, setTitle] = useState('')
   const [waitSec, setWaitSec] = useState('1.5')
-  // 開啟時帶入節點目標視窗(去 * 取關鍵字);使用者改過就不覆蓋
+  const [wins, setWins] = useState<UiaWindowInfo[] | null>(null)
+  const [loadingWins, setLoadingWins] = useState(false)
+  // 每次打開都重帶節點「目標視窗」—— 使用者剛在 Inspector 選了別的視窗再來插喚醒,
+  // 若沿用上次打的字就會喚醒錯視窗(實測使用者只好手打標題)
   useEffect(() => {
-    if (isOpen && !title.trim() && defaultTitle) {
-      setTitle(defaultTitle.replace(/\*/g, '').trim())
+    if (isOpen) {
+      setTitle(windowKeyword(defaultTitle))
+      setWins(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
+
+  const loadWins = async () => {
+    setLoadingWins(true)
+    try {
+      const r = await uiaListWindows()
+      setWins((r.windows || []).filter(w => (w.name || '').trim() && !w.is_offscreen))
+    } catch (e) {
+      toast.error(`列視窗失敗:${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setLoadingWins(false)
+    }
+  }
 
   const submit = () => {
     if (!title.trim()) { toast.error('請填視窗標題關鍵字'); return }
@@ -72,12 +90,38 @@ export default function WakeWindowInserter({ index, isOpen, defaultTitle, openMe
         <AppWindow className="w-3 h-3 shrink-0" />
         <span>喚醒視窗（拉到前景 + 等載入）</span>
       </div>
-      <label className="block">
+      <div className="block">
         <span className="text-[10px] text-gray-500">視窗標題關鍵字（包含比對）</span>
-        <input value={title} onChange={e => setTitle(e.target.value)}
-          placeholder="例：E-Quote測試靶"
-          className="w-full text-[11px] px-1.5 py-1 rounded border border-gray-300 outline-none focus:border-cyan-500" />
-      </label>
+        <div className="flex gap-1">
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="例：E-Quote測試靶"
+            className="flex-1 min-w-0 text-[11px] px-1.5 py-1 rounded border border-gray-300 outline-none focus:border-cyan-500" />
+          <button type="button" onClick={loadWins} disabled={loadingWins}
+            title="列出目前開著的視窗,點一個自動填關鍵字"
+            className="shrink-0 whitespace-nowrap flex items-center gap-0.5 text-[10px] px-1.5 py-1 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50 disabled:opacity-50">
+            {loadingWins ? <RefreshCcw className="w-3 h-3 animate-spin" /> : <AppWindow className="w-3 h-3" />}
+            列視窗
+          </button>
+        </div>
+      </div>
+      {wins && (
+        <div className="max-h-44 overflow-y-auto rounded border border-cyan-200 bg-white">
+          {wins.length === 0 && <div className="px-2 py-2 text-[10px] text-gray-400 text-center">沒有可顯示的視窗</div>}
+          {wins.map((w, i) => (
+            <button key={i} type="button"
+              onClick={() => { setTitle(windowKeyword(w.name)); setWins(null) }}
+              onMouseEnter={() => {
+                if (w.rect?.length === 4 && w.rect[2] > 0) {
+                  uiaHighlight({ x: w.rect[0], y: w.rect[1], width: w.rect[2], height: w.rect[3], ttl_ms: 1500 }).catch(() => {})
+                }
+              }}
+              className="w-full text-left px-2 py-1 border-b border-gray-100 last:border-b-0 hover:bg-cyan-50">
+              <div className="text-[11px] text-gray-800 truncate" title={w.name}>{windowKeyword(w.name) || w.name}</div>
+              <div className="text-[9px] text-gray-400 truncate">{w.name}</div>
+            </button>
+          ))}
+        </div>
+      )}
       <label className="flex items-center gap-1 text-[10px] text-gray-500 whitespace-nowrap">
         喚醒後等
         <input value={waitSec} onChange={e => setWaitSec(e.target.value)}
