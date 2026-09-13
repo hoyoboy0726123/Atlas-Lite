@@ -535,6 +535,8 @@ export interface UiaInspectResult {
   window: { name: string; class: string; rect: number[]; process_id: number }
   tree: UiaElement
   error?: string
+  /** 掃描被截斷的情況;depth_cut>0 代表還有更深的元素沒讀到 */
+  truncated?: { depth_cut: number; budget_hit: boolean; nodes: number; max_depth: number }
 }
 
 /** 檢視指定視窗的 UIA element tree(空 window = 當前 foreground)。 */

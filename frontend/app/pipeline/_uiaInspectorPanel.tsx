@@ -237,7 +237,8 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
       // ⚠ 深度一定要夠:瀏覽器把頁面內容埋在自己的外框底下,實測 Edge 上一個平常的
       //   表單欄位在**深度 13-14**。深度 6 抓下來全是最小化/網址列/索引標籤,
       //   使用者要找的欄位根本不在樹裡 —— 而且畫面上看不出來,只會覺得「找不到我要的」。
-      const r = await uiaInspect({ window: uiaWindow, max_depth: 18, max_children_per_node: 200 })
+      //   公司入口網站(框架 + iframe 內嵌舊系統)實測 18 層仍整片表單被截掉,只剩頁尾連結。
+      const r = await uiaInspect({ window: uiaWindow, max_depth: 60, max_children_per_node: 200 })
       setTree(r)
       setExpanded(new Set(['']))
       setPicker(null)
@@ -655,6 +656,15 @@ export default function UiaInspectorPanel({ uiaWindow, onUpdateWindow, onAddActi
                 {pageOnly
                   ? `已排除 ${stats.totalAll - stats.totalScoped} 個瀏覽器外框（網址列 / 工具列 / 分頁）`
                   : '含瀏覽器外框、數字會被灌水'}
+              </div>
+            )}
+            {tree.truncated && (tree.truncated.depth_cut > 0 || tree.truncated.budget_hit) && (
+              <div className="mt-1 font-semibold text-red-700">
+                ⚠ 元素樹沒讀完（
+                {tree.truncated.budget_hit
+                  ? `超過 ${tree.truncated.nodes} 個節點上限`
+                  : `${tree.truncated.depth_cut} 處超過 ${tree.truncated.max_depth} 層`}
+                ）—— 找不到的欄位可能在被截掉的部分，改用 CV / OCR 或縮小目標視窗
               </div>
             )}
           </div>

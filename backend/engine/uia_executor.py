@@ -195,7 +195,7 @@ def _find_control(auto, parent, control_def: dict, fallback_rect: Optional[list]
     # ⚠ 預設深度 10 對原生 app 夠,但**網頁表單一律搜不到** —— 瀏覽器把頁面內容
     #   埋在自己的外框底下,實測 Edge 上一個平常的表單欄位在深度 13-14(樹深 15)。
     #   症狀:inspect_window 看得到 auto_id、_find_control 卻回「找不到控制項」。
-    kwargs = {"searchDepth": control_def.get("depth", 30)}
+    kwargs = {"searchDepth": control_def.get("depth", 60)}
     if name:
         if "*" in name:
             # 萬用字元 → RegexName。真實系統的遮罩/狀態文字常沒有 auto_id、
@@ -284,7 +284,8 @@ def element_exists(window_pattern: str, control_def: dict,
 # ── inspect:回傳 element tree(給 frontend tree picker 用)──────────────
 def inspect_window(window_pattern: str = "", max_depth: int = 6,
                    max_children_per_node: int = 50,
-                   logger: Optional[logging.Logger] = None) -> dict:
+                   logger: Optional[logging.Logger] = None,
+                   max_nodes: int = 8000) -> dict:
     """檢視指定視窗的 UIA element tree、回 JSON 結構。
 
     Args:
@@ -357,8 +358,13 @@ def inspect_window(window_pattern: str = "", max_depth: int = 6,
             "process_id": int(getattr(win, "ProcessId", 0) or 0),
         }
 
-        # 遞迴抓 tree
+        # 遞迴抓 tree。截斷一定要回報:公司入口網站把表單包在 iframe + 層層框架裡,
+        # 深度不夠時欄位整片消失、畫面只剩頁尾連結,使用者完全看不出是被截掉的。
+        cut = {"depth": 0, "budget": False}
+        seen = [0]
+
         def _walk(ctrl, depth: int) -> dict:
+            seen[0] += 1
             try:
                 rect = ctrl.BoundingRectangle
                 node = {
@@ -375,18 +381,28 @@ def inspect_window(window_pattern: str = "", max_depth: int = 6,
                 return {"type": "?", "name": f"(讀取失敗:{e!s:.80})", "children": []}
 
             if depth >= max_depth:
+                try:
+                    if ctrl.GetFirstChildControl():
+                        cut["depth"] += 1
+                except Exception:
+                    pass
                 return node
 
             try:
                 kids = ctrl.GetChildren()[:max_children_per_node]
                 for k in kids:
+                    if seen[0] >= max_nodes:
+                        cut["budget"] = True
+                        break
                     node["children"].append(_walk(k, depth + 1))
             except Exception:
                 pass
             return node
 
         tree = _walk(win, depth=0)
-        return {"ok": True, "window": win_meta, "tree": tree}
+        return {"ok": True, "window": win_meta, "tree": tree,
+                "truncated": {"depth_cut": cut["depth"], "budget_hit": cut["budget"],
+                              "nodes": seen[0], "max_depth": max_depth}}
 
     except Exception as e:
         log.exception("inspect_window 失敗")
