@@ -1445,7 +1445,8 @@ def execute_action(
                 # 預設三層 fallback (UIA ☑ + CV ☑ + 座標 ☑) 完全忽略 cv_coord_fallback、
                 # 避免 step-level 跟 action-level 兩個 toggle 互相干擾、使用者全勾預設卻退不到座標的 bug。
                 is_explicit_advanced = use_ocr or (not use_uia_layer)
-                step_level_blocks_fallback = is_explicit_advanced and not cv_coord_fallback
+                step_level_blocks_fallback = is_explicit_advanced and not (
+                    cv_coord_fallback or bool(action.get("coord_fallback", False)))
 
                 if (has_coord and allow_coord_fallback and use_coord_layer
                         and not step_level_blocks_fallback):
@@ -1465,8 +1466,8 @@ def execute_action(
                     return ActionResult(False, index, atype, fail_msg)
                 elif has_coord and step_level_blocks_fallback:
                     _mode = "OCR 進階模式" if use_ocr else "CV-only 模式"
-                    fail_msg = (f"找不到錨點圖 {img_name}({m.reason}),且在 {_mode} 下使用者關閉了步驟層級「CV 失敗退回座標」。"
-                        f"若要容錯請到 panel 的 CV 設定打開該 toggle。")
+                    fail_msg = (f"找不到錨點圖 {img_name}({m.reason}),且在 {_mode} 下沒開「CV 失敗退回座標」。"
+                        f"若要容錯請勾該動作的「📍 座標 (fallback)」,或到 CV 設定打開整個節點的 toggle。")
                     logger.error(f"[computer_use]   ✗ {fail_msg}")
                     return ActionResult(False, index, atype, fail_msg)
                 else:

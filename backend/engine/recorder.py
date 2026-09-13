@@ -405,13 +405,14 @@ def _on_click(x: int, y: int, button, pressed: bool) -> None:
             "hold_sec": hold_sec,
             "modifiers": mods,
             "description": f"{mods_desc}{btn_name} 點擊 @ {panchor.get('image')}{hold_desc}（錄製座標 {x},{y}）",
-            # 預設「全三層」:UIA-first → CV → 座標。
-            # 舊預設是純 CV（當時 UIA-first 尚弱）；現在 UIA 深度搜尋 / GetPattern
-            # 都修好了,有身分的元素 UIA 最穩、匿名元素自動退 CV,面板也會對
-            # 「純 UIA × 匿名元素」直接警告。三層全開涵蓋兩種情況。
-            "use_uia": True,
+            # 預設「CV 優先、失敗退座標」:錄到的點擊直接走 CV 比對,找不到點錄製座標。
+            # 錄製當下自動抓的 UIA 元素常是外層容器(整片 Group / 說明文字),
+            # UIA-first 命中後點在容器中心、回報成功卻點錯地方 —— 實測 UIA 要
+            # 從抓取元素手動挑才準,錄製反而 CV 可靠。ui 資訊照存,面板可開回。
+            "use_uia": False,
             "use_cv": True,
             "use_coord": True,
+            "coord_fallback": True,
         }
         click_action.update(panchor)  # image + anchor_off_x + anchor_off_y
         if pui:

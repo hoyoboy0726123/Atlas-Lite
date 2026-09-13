@@ -108,6 +108,10 @@ class ComputerUseAction(BaseModel):
     use_uia: bool = True
     use_cv: bool = True
     use_coord: bool = True
+    # 純 CV 模式(use_uia=False)下「CV 找不到 → 退錄製座標」的 action 層級開關。
+    # 節點層級 cv_coord_fallback 預設 False 且只在 true 時寫進 YAML,改它的預設
+    # 會讓所有舊節點的純 CV 動作一起開始亂點座標;錄製新動作改帶這個欄位。
+    coord_fallback: bool = False
     hold_sec: float = 0.0      # > 0 會在回放時 mouseDown-sleep-mouseUp 取代瞬擊
     modifiers: list[str] = []  # click 時按著的修飾鍵（如 ["ctrl","shift"]）
 

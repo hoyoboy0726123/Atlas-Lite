@@ -126,6 +126,7 @@ export interface ComputerUseAction {
   use_uia?: boolean     // UIA element 結構定位(預設 True)
   use_cv?: boolean      // CV 圖像比對(預設 True)
   use_coord?: boolean   // 強制座標最終 fallback(預設 True、舊欄位、語意改成「最終座標 fallback 啟用」)
+  coord_fallback?: boolean  // 純 CV 模式:CV 找不到退錄製座標(action 層級;錄製預設 true)
   hold_sec?: number     // click 長按時間（>0 時回放走 mouseDown→sleep→mouseUp）
   modifiers?: string[]  // click 時按著的修飾鍵（如 ["ctrl"]、["ctrl","shift"]）
   use_ocr?: boolean     // click_image 顯式 OCR 啟用（勾選才跑 OCR，避免 silent 填字但沒觸發）
