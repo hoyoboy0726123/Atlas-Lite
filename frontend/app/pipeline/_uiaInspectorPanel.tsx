@@ -1018,13 +1018,13 @@ function UiaActionPicker({
             <option value="none">不做動作</option>
           </select>
           {ifThen === 'wait_gone' && (
-            <>
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
               <input value={ifGoneTimeout} onChange={e => setIfGoneTimeout(e.target.value)}
                 className="w-12 border border-gray-200 rounded px-1.5 py-1 text-xs text-right" title="最多等幾秒" />
-              秒
-            </>
+              秒，
+            </span>
           )}
-          否則 →
+          <span className="whitespace-nowrap">否則 →</span>
           <select value={ifElse} onChange={e => setIfElse(e.target.value)}
             className="border border-gray-200 rounded px-1.5 py-1 text-xs">
             <option value="none">不做動作</option>
